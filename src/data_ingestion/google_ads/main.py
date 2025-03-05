@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from token_refresh import get_access_token, refresh_token, schedule_token_refresh
 
 # Set up logging
 logging.basicConfig(
@@ -35,24 +36,19 @@ engine = create_engine(DATABASE_URL)
 
 def get_google_ads_client():
     """Create and return a Google Ads API client."""
-    if not all([
-        GOOGLE_ADS_DEVELOPER_TOKEN,
-        GOOGLE_ADS_CLIENT_ID,
-        GOOGLE_ADS_CLIENT_SECRET,
-        GOOGLE_ADS_REFRESH_TOKEN
-    ]):
-        logger.error("Google Ads API credentials are not properly configured")
+    try:
+        # Check if we need to refresh the token first
+        if not get_access_token():
+            logger.error("Failed to get a valid access token")
+            return None
+            
+        # Now load the client from environment variables
+        # The token refresher ensures the oauth2 credentials are current
+        client = GoogleAdsClient.load_from_env()
+        return client
+    except Exception as e:
+        logger.error(f"Failed to create Google Ads client: {e}")
         return None
-        
-    credentials = {
-        "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
-        "client_id": GOOGLE_ADS_CLIENT_ID,
-        "client_secret": GOOGLE_ADS_CLIENT_SECRET,
-        "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
-        "use_proto_plus": True
-    }
-    
-    return GoogleAdsClient.load_from_dict(credentials)
 
 def get_date_dimension_id(date):
     """Get the date dimension ID for a given date, creating the date entry if it doesn't exist."""
@@ -478,8 +474,10 @@ def main():
     parser.add_argument("--backfill", action="store_true", help="Run in backfill mode")
     parser.add_argument("--start-date", help="Start date for backfill (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date for backfill (YYYY-MM-DD)")
-    parser.add_argument("--days-back", type=int, default=3, help="Number of days to look back for regular ETL")
     args = parser.parse_args()
+    
+    # Always ensure token is refreshed when starting
+    refresh_token()
     
     if args.backfill:
         if not args.start_date:
@@ -491,13 +489,12 @@ def main():
         schedule_jobs()
         logger.info("Starting scheduled jobs...")
         
-        # Keep the script running
-        try:
-            while True:
-                schedule.run_pending()
-                time.sleep(60)  # Sleep for 1 minute between schedule checks
-        except KeyboardInterrupt:
-            logger.info("Process interrupted, shutting down")
+        # Add a token refresh schedule - every 50 minutes
+        schedule.every(50).minutes.do(refresh_token)
+        
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # Check schedule every minute
 
 if __name__ == "__main__":
     logger.info("Starting Google Ads connector service")

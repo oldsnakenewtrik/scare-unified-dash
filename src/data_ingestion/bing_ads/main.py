@@ -4,6 +4,7 @@ Bing Ads API integration for SCARE Unified Dashboard
 """
 import os
 import time
+import json
 import logging
 import datetime
 import argparse
@@ -17,6 +18,7 @@ from bingads.v13.reporting.reporting_service_manager import ReportingServiceMana
 import xml.etree.ElementTree as ET
 import tempfile
 import json
+from token_refresh import get_access_token, get_refresh_token, refresh_token
 
 # Configure logging
 logging.basicConfig(
@@ -43,32 +45,45 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 def get_auth_data():
     """
-    Get Bing Ads authentication data
+    Get authentication data for Bing Ads API
     
     Returns:
-        AuthorizationData: Authorization data for Bing Ads API
+        AuthorizationData object or None if authentication fails
     """
     try:
-        authorization_data = AuthorizationData(
-            account_id=BING_ADS_ACCOUNT_ID,
-            customer_id=None,
-            developer_token=BING_ADS_DEVELOPER_TOKEN,
-            authentication=None
+        # Refresh the token if needed
+        access_token = get_access_token()
+        if not access_token:
+            logger.error("Failed to get a valid access token for Bing Ads")
+            return None
+            
+        # Get credentials from environment variables
+        developer_token = os.environ.get("BING_ADS_DEVELOPER_TOKEN")
+        client_id = os.environ.get("BING_ADS_CLIENT_ID")
+        account_id = os.environ.get("BING_ADS_ACCOUNT_ID")
+        
+        if not all([developer_token, client_id, account_id, access_token]):
+            logger.error("Missing Bing Ads API credentials")
+            return None
+            
+        # Create the authorization data object with OAuth
+        auth_data = AuthorizationData(
+            account_id=account_id,
+            customer_id=None,  # Not needed for reporting
+            developer_token=developer_token,
+            authentication=None  # Will be set directly using the access token
         )
         
-        oauth_web_auth_code_grant = OAuthWebAuthCodeGrant(
-            client_id=BING_ADS_CLIENT_ID,
-            client_secret=BING_ADS_CLIENT_SECRET,
-            redirection_uri="https://login.microsoftonline.com/common/oauth2/nativeclient"
-        )
+        # Set the authentication directly with the access token
+        auth_data.authentication = {
+            'access_token': access_token,
+            'access_token_expires_in_seconds': 3600,  # Default expiration is 1 hour
+            'token_type': 'Bearer'
+        }
         
-        oauth_web_auth_code_grant.request_oauth_tokens_by_refresh_token(BING_ADS_REFRESH_TOKEN)
-        authorization_data.authentication = oauth_web_auth_code_grant
-        
-        logger.info("Bing Ads authentication successful")
-        return authorization_data
+        return auth_data
     except Exception as e:
-        logger.error(f"Bing Ads authentication failed: {e}")
+        logger.error(f"Error creating Bing Ads authentication data: {e}")
         return None
 
 def get_db_connection():
@@ -410,6 +425,9 @@ def main():
     parser.add_argument("--end-date", help="End date for backfill (YYYY-MM-DD)")
     args = parser.parse_args()
     
+    # Always ensure token is refreshed when starting
+    refresh_token()
+    
     if args.backfill:
         if not args.start_date:
             logger.error("Start date required for backfill")
@@ -420,16 +438,13 @@ def main():
         setup_schedule()
         logger.info("Starting scheduled jobs...")
         
-        # Run once immediately
-        fetch_and_store_daily_data()
+        # Add a token refresh schedule - every 50 minutes
+        schedule.every(50).minutes.do(refresh_token)
         
         # Keep the script running
-        try:
-            while True:
-                schedule.run_pending()
-                time.sleep(60)
-        except KeyboardInterrupt:
-            logger.info("Process interrupted, shutting down")
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # Sleep for 1 minute between schedule checks
 
 if __name__ == "__main__":
     main()
