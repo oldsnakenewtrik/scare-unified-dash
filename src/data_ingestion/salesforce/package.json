@@ -1,0 +1,19 @@
+{
+  "name": "salesforce-csv-connector",
+  "version": "1.0.0",
+  "description": "Email receiver for Salesforce CSV reports",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.3",
+    "node-cron": "^3.0.2",
+    "csv-parser": "^3.0.0",
+    "pg": "^8.9.0",
+    "winston": "^3.8.2"
+  }
+}

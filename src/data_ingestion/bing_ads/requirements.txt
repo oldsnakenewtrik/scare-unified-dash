@@ -1,0 +1,6 @@
+bingads==13.0.16
+pandas==1.5.3
+sqlalchemy==2.0.4
+psycopg2-binary==2.9.5
+schedule==1.1.0
+python-dotenv==1.0.0

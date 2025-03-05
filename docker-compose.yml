@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Database
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: scare_user
+      POSTGRES_PASSWORD: scare_password
+      POSTGRES_DB: scare_metrics
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    restart: unless-stopped
+    networks:
+      - scare_network
+
+  # API Service
+  api:
+    build:
+      context: ./src/api
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+    volumes:
+      - ./src/api:/app
+
+  # Frontend
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:5000
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - scare_network
+    volumes:
+      - ./src/frontend:/app
+
+  # Redtrack
+  redtrack:
+    build:
+      context: ./src/data_ingestion/redtrack
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+      REDTRACK_API_KEY: ${REDTRACK_API_KEY}
+      DATA_FETCH_INTERVAL_HOURS: 12
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+
+  # Google Ads
+  google_ads:
+    build:
+      context: ./src/data_ingestion/google_ads
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN}
+      GOOGLE_ADS_CLIENT_ID: ${GOOGLE_ADS_CLIENT_ID}
+      GOOGLE_ADS_CLIENT_SECRET: ${GOOGLE_ADS_CLIENT_SECRET}
+      GOOGLE_ADS_REFRESH_TOKEN: ${GOOGLE_ADS_REFRESH_TOKEN}
+      GOOGLE_ADS_CUSTOMER_ID: ${GOOGLE_ADS_CUSTOMER_ID}
+      DATA_FETCH_INTERVAL_HOURS: 12
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+    volumes:
+      - ./src/data_ingestion/google_ads:/app
+
+  # Bing Ads
+  bing_ads:
+    build:
+      context: ./src/data_ingestion/bing_ads
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+      BING_ADS_DEVELOPER_TOKEN: ${BING_ADS_DEVELOPER_TOKEN}
+      BING_ADS_CLIENT_ID: ${BING_ADS_CLIENT_ID}
+      BING_ADS_CLIENT_SECRET: ${BING_ADS_CLIENT_SECRET}
+      BING_ADS_REFRESH_TOKEN: ${BING_ADS_REFRESH_TOKEN}
+      BING_ADS_ACCOUNT_ID: ${BING_ADS_ACCOUNT_ID}
+      DATA_FETCH_INTERVAL_HOURS: 12
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+    volumes:
+      - ./src/data_ingestion/bing_ads:/app
+      - ./reports:/app/reports
+
+  # Salesforce
+  salesforce:
+    build:
+      context: ./src/data_ingestion/salesforce
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+      IMAP_SERVER: ${IMAP_SERVER}
+      IMAP_PORT: ${IMAP_PORT}
+      IMAP_USER: ${IMAP_USER}
+      IMAP_PASSWORD: ${IMAP_PASSWORD}
+      CHECK_EMAIL_CRON_SCHEDULE: ${CHECK_EMAIL_CRON_SCHEDULE}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+
+networks:
+  scare_network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,75 +1,115 @@
 # SCARE Unified Metrics Dashboard
 
-A centralized dashboard that aggregates and visualizes marketing metrics from multiple data sources, deployed on Railway.
+A comprehensive dashboard for aggregating and visualizing marketing metrics from multiple sources including RedTrack, Google Ads, Bing Ads, Salesforce, and Matomo.
 
 ## Project Overview
 
-This project aims to create a unified dashboard that aggregates data from multiple marketing and analytics platforms:
+This project implements a unified metrics dashboard that consolidates data from various marketing platforms, providing a centralized view of campaign performance across different channels.
 
-- RedTrack
-- Matomo
-- Google Ads
-- Bing Ads
-- Salesforce (via CSV reports)
+### Features
 
-The dashboard provides a comprehensive view of marketing performance with automated data collection, transformation, and visualization.
+- **Unified Campaign View**: View all campaign metrics in one place with monthly tabs
+- **Toggle Active/Archived Campaigns**: Filter to show only active campaigns or include archived ones
+- **Sort and Filter**: Sort by any metric column and filter by time period
+- **Data Aggregation**: Automatically aggregates data from multiple sources
+- **Historical Data Backfill**: Easily backfill historical data from Google Ads and Bing Ads
+- **Dockerized Deployment**: Easy deployment using Docker and Railway
 
 ## Architecture
 
-The system consists of these main components:
+The project follows a microservices architecture:
 
-1. **Data Ingestion Layer**: Services that collect data from various sources
-   - API integrations for RedTrack, Matomo, Google Ads, and Bing Ads
-   - Email receiver for Salesforce CSV reports
-
-2. **Central Database**: PostgreSQL/MySQL database hosted on Railway
-
-3. **Frontend Dashboard**: Web-based UI for data visualization
-
-## Repository Structure
-
-This repository will contain:
-
-- Documentation
-- Infrastructure configuration
-- Deployment scripts
-- Core components and services
-- Database schema definitions
-
-Individual data connector services may be maintained in separate repositories and deployed as microservices.
-
-## Development Plan
-
-See the [Development Plan](development-plan.md) for detailed implementation steps.
+- **API Service**: FastAPI-based backend for data retrieval and aggregation
+- **Data Ingestion Services**: Separate services for each data source
+  - RedTrack Connector
+  - Google Ads Connector
+  - Bing Ads Connector
+  - Salesforce Email Connector
+- **Database**: PostgreSQL for data storage
+- **Frontend**: React-based dashboard with Material UI
 
 ## Getting Started
 
 ### Prerequisites
 
-- Railway account
-- API access to RedTrack, Matomo, Google Ads, and Bing Ads
-- Dedicated email account for receiving Salesforce CSV reports
-- Docker and Docker Compose (for local development)
+- Docker and Docker Compose
+- Node.js (for local development)
+- Python 3.9+ (for local development)
 
-### Local Development
+### Installation
 
-Instructions for local development will be added as the project progresses.
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/scare-unified-dash.git
+   cd scare-unified-dash
+   ```
 
-### Deployment
+2. Create a `.env` file based on `.env.example`:
+   ```
+   cp .env.example .env
+   ```
+   Edit the `.env` file to add your API keys and configurations.
 
-The project is designed to be deployed on [Railway](https://railway.app/), with each component containerized for easy deployment.
+3. Start the application using Docker Compose:
+   ```
+   docker-compose up -d
+   ```
 
-## Tech Stack
+4. Access the dashboard at http://localhost:3000
 
-- **Backend**: Python/Node.js (for data ingestion services)
-- **Database**: PostgreSQL/MySQL (hosted on Railway)
-- **Frontend**: React/Vue/Next.js
-- **Deployment**: Docker, Railway
+### Development
+
+For development, you can run the services individually:
+
+```
+# API Service
+cd src/api
+pip install -r requirements.txt
+uvicorn main:app --reload
+
+# Frontend
+cd src/frontend
+npm install
+npm start
+```
+
+### Data Backfill
+
+The system includes a backfill script to populate historical data from Google Ads and Bing Ads:
+
+```
+# Backfill both Google Ads and Bing Ads for a specific date range
+python backfill.py --start-date 2024-01-01 --end-date 2024-03-31
+
+# Backfill only Google Ads
+python backfill.py --start-date 2024-01-01 --end-date 2024-03-31 --source google
+
+# Backfill only Bing Ads
+python backfill.py --start-date 2024-01-01 --end-date 2024-03-31 --source bing
+```
+
+You can also run backfill commands directly in the containers:
+
+```
+# Google Ads backfill
+docker-compose run --rm google_ads python /app/main.py --backfill --start-date 2024-01-01 --end-date 2024-03-31
+
+# Bing Ads backfill
+docker-compose run --rm bing_ads python /app/main.py --backfill --start-date 2024-01-01 --end-date 2024-03-31
+```
+
+For regular updates, the services automatically fetch the latest data at intervals defined by the `DATA_FETCH_INTERVAL_HOURS` environment variable (default: 12 hours).
+
+## Deployment
+
+The project is configured for deployment on Railway:
+
+1. Push your code to GitHub
+2. Create a new project on Railway
+3. Connect to your GitHub repository
+4. Set up the environment variables in Railway dashboard
+5. Deploy!
 
 ## License
 
-This project is proprietary and confidential.
-
-## Contributing
-
-Guidelines for contributing to this project will be established as development progresses.
+This project is licensed under the MIT License - see the LICENSE file for details.
