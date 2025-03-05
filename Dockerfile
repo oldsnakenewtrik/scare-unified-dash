@@ -18,6 +18,7 @@ WORKDIR /app
 
 # Copy from build stage
 COPY --from=api-build /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+COPY --from=api-build /usr/local/bin /usr/local/bin
 COPY --from=api-build /app /app
 
 # Set environment variables
