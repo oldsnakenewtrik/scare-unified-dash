@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import List, Optional
 import datetime
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +19,15 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 app = FastAPI(title="SCARE Unified Metrics API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://front-production-f6e6.up.railway.app", "*"],  # Allow your frontend domain and all origins during development
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Dependency
 def get_db():
