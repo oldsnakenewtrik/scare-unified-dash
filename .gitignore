@@ -45,7 +45,3 @@ env/
 .railway/
 
 # Credentials
-/src/credentials/google_ads/
-/src/credentials/bing_ads/
-/src/credentials/redtrack/
-/src/credentials/salesforce/
