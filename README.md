@@ -100,6 +100,21 @@ docker-compose run --rm bing_ads python /app/main.py --backfill --start-date 202
 
 For regular updates, the services automatically fetch the latest data at intervals defined by the `DATA_FETCH_INTERVAL_HOURS` environment variable (default: 12 hours).
 
+## Recent Updates
+
+### Campaign Name Mapping Enhancement
+- Added comprehensive campaign name mapping functionality allowing users to:
+  - Create user-friendly names for campaigns across different platforms
+  - Categorize campaigns with consistent labels
+  - Track campaign types for better reporting
+  - View source network information (Search, Display, Shopping, etc.)
+
+### Network Information Tracking
+- Added network identification and filtering across all ad platforms
+- Enhanced reporting with network context for better analysis
+- Improved campaign mapping with network-specific grouping
+- Updated dashboard views to display network information alongside campaigns
+
 ## Deployment
 
 The project is configured for deployment on Railway:

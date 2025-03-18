@@ -22,13 +22,21 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TableSortLabel
+  TableSortLabel,
+  IconButton,
+  Menu,
+  MenuItem
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { format, subDays, subMonths, parse } from 'date-fns';
+import SettingsIcon from '@mui/icons-material/Settings';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
+
+// Import components
+import CampaignMapping from './components/CampaignMapping';
 
 // Create a theme
 const theme = createTheme({
@@ -106,7 +114,13 @@ function App() {
   const [monthTabs] = useState(generateMonthTabs());
   const [orderBy, setOrderBy] = useState('campaign');
   const [order, setOrder] = useState('asc');
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' or 'campaign-mapping'
   
+  // Settings menu state
+  const [anchorEl, setAnchorEl] = useState(null);
+  const openMenu = Boolean(anchorEl);
+  const navigate = useNavigate();
+
   // Function to fetch data from API
   const fetchData = async () => {
     setLoading(true);
@@ -278,6 +292,28 @@ function App() {
     filterDataByTab(activeTab, campaignData, event.target.checked);
   };
   
+  // Settings menu handlers
+  const handleOpenSettings = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+  
+  const handleCloseSettings = () => {
+    setAnchorEl(null);
+  };
+  
+  const handleNavigate = (path) => {
+    setCurrentView(path);
+    setAnchorEl(null);
+    if (path === 'dashboard') {
+      navigate('/');
+    } else if (path.includes('?')) {
+      // Handle paths with query parameters
+      navigate(`/${path}`);
+    } else {
+      navigate(`/${path}`);
+    }
+  };
+
   // Fetch data on component mount
   useEffect(() => {
     fetchData();
@@ -292,133 +328,173 @@ function App() {
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
               SCARE Unified Metrics Dashboard
             </Typography>
+            <IconButton
+              color="inherit"
+              onClick={handleOpenSettings}
+              aria-label="settings"
+            >
+              <SettingsIcon />
+            </IconButton>
+            <Menu
+              id="menu-appbar"
+              anchorEl={anchorEl}
+              anchorOrigin={{
+                vertical: 'bottom',
+                horizontal: 'right',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              open={Boolean(anchorEl)}
+              onClose={handleCloseSettings}
+            >
+              <MenuItem onClick={() => handleNavigate('dashboard')}>Dashboard</MenuItem>
+              <MenuItem onClick={() => handleNavigate('campaign-mapping')}>Campaign Name Mapping</MenuItem>
+              <MenuItem onClick={() => handleNavigate('settings/campaign-mapping?refresh=true')}>Check for New Campaigns</MenuItem>
+            </Menu>
           </Toolbar>
         </AppBar>
-        
-        <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-          {/* Controls */}
-          <Paper sx={{ p: 2, mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={showArchived}
-                      onChange={handleArchivedToggle}
-                      color="primary"
+
+        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+          {currentView === 'dashboard' ? (
+            <>
+              {/* Campaign filters */}
+              <Paper sx={{ p: 2, mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={showArchived}
+                          onChange={handleArchivedToggle}
+                          color="primary"
+                        />
+                      }
+                      label="Show Archived Campaigns"
                     />
-                  }
-                  label="Show Archived Campaigns"
-                />
-              </Box>
-              <Box>
-                <Button 
-                  variant="contained" 
-                  onClick={fetchData}
-                  disabled={loading}
+                  </Box>
+                  <Box>
+                    <Button 
+                      variant="contained" 
+                      onClick={fetchData}
+                      disabled={loading}
+                    >
+                      {loading ? 'Loading...' : 'Refresh Data'}
+                    </Button>
+                  </Box>
+                </Box>
+              </Paper>
+              
+              {/* Error display */}
+              {error && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: 'error.light' }}>
+                  <Typography color="error">{error}</Typography>
+                </Paper>
+              )}
+              
+              {/* Loading indicator */}
+              {loading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+                  <CircularProgress />
+                </Box>
+              )}
+              
+              {/* Month tabs */}
+              <Paper sx={{ mb: 3 }}>
+                <Tabs
+                  value={activeTab}
+                  onChange={handleTabChange}
+                  indicatorColor="primary"
+                  textColor="primary"
+                  variant="scrollable"
+                  scrollButtons="auto"
                 >
-                  {loading ? 'Loading...' : 'Refresh Data'}
-                </Button>
-              </Box>
-            </Box>
-          </Paper>
-          
-          {/* Error display */}
-          {error && (
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'error.light' }}>
-              <Typography color="error">{error}</Typography>
-            </Paper>
-          )}
-          
-          {/* Loading indicator */}
-          {loading && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-              <CircularProgress />
-            </Box>
-          )}
-          
-          {/* Month tabs */}
-          <Paper sx={{ mb: 3 }}>
-            <Tabs
-              value={activeTab}
-              onChange={handleTabChange}
-              indicatorColor="primary"
-              textColor="primary"
-              variant="scrollable"
-              scrollButtons="auto"
-            >
-              {monthTabs.map((tab) => (
-                <Tab key={tab.value} label={tab.label} value={tab.value} />
-              ))}
-            </Tabs>
-          </Paper>
-          
-          {/* Campaign data table */}
-          <Paper sx={{ width: '100%', overflow: 'hidden' }}>
-            <TableContainer sx={{ maxHeight: 600 }}>
-              <Table stickyHeader aria-label="campaign metrics table">
-                <TableHead>
-                  <TableRow>
-                    {columns.map((column) => (
-                      <TableCell
-                        key={column.id}
-                        align={column.align}
-                        style={{ minWidth: column.minWidth }}
-                        sortDirection={orderBy === column.id ? order : false}
-                      >
-                        <TableSortLabel
-                          active={orderBy === column.id}
-                          direction={orderBy === column.id ? order : 'asc'}
-                          onClick={() => handleRequestSort(column.id)}
-                        >
-                          {column.label}
-                        </TableSortLabel>
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {getSortedData().map((row, index) => {
-                    return (
-                      <TableRow hover role="checkbox" tabIndex={-1} key={index}>
-                        {columns.map((column) => {
-                          const value = row[column.id];
-                          return (
-                            <TableCell key={column.id} align={column.align}>
-                              {column.id === 'status' ? (
-                                <Box
-                                  component="span"
-                                  sx={{
-                                    p: 0.5,
-                                    borderRadius: 1,
-                                    bgcolor: value === 'Active' ? 'success.light' : 'text.disabled',
-                                    color: value === 'Active' ? 'success.dark' : 'text.primary'
-                                  }}
-                                >
-                                  {value}
-                                </Box>
-                              ) : column.format && value !== null ? (
-                                column.format(value)
-                              ) : (
-                                value || 'N/A'
-                              )}
-                            </TableCell>
-                          );
-                        })}
+                  {monthTabs.map((tab) => (
+                    <Tab key={tab.value} label={tab.label} value={tab.value} />
+                  ))}
+                </Tabs>
+              </Paper>
+              
+              {/* Campaign data table */}
+              <Paper sx={{ width: '100%', overflow: 'hidden' }}>
+                <TableContainer sx={{ maxHeight: 600 }}>
+                  <Table stickyHeader aria-label="campaign metrics table">
+                    <TableHead>
+                      <TableRow>
+                        {columns.map((column) => (
+                          <TableCell
+                            key={column.id}
+                            align={column.align}
+                            style={{ minWidth: column.minWidth }}
+                            sortDirection={orderBy === column.id ? order : false}
+                          >
+                            <TableSortLabel
+                              active={orderBy === column.id}
+                              direction={orderBy === column.id ? order : 'asc'}
+                              onClick={() => handleRequestSort(column.id)}
+                            >
+                              {column.label}
+                            </TableSortLabel>
+                          </TableCell>
+                        ))}
                       </TableRow>
-                    );
-                  })}
-                  {filteredData.length === 0 && !loading && (
-                    <TableRow>
-                      <TableCell colSpan={columns.length} align="center">
-                        No data available for this period
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
+                    </TableHead>
+                    <TableBody>
+                      {getSortedData().map((row, index) => {
+                        return (
+                          <TableRow hover role="checkbox" tabIndex={-1} key={index}>
+                            {columns.map((column) => {
+                              const value = row[column.id];
+                              return (
+                                <TableCell key={column.id} align={column.align}>
+                                  {column.id === 'status' ? (
+                                    <Box
+                                      component="span"
+                                      sx={{
+                                        p: 0.5,
+                                        borderRadius: 1,
+                                        bgcolor: value === 'Active' ? 'success.light' : 'text.disabled',
+                                        color: value === 'Active' ? 'success.dark' : 'text.primary'
+                                      }}
+                                    >
+                                      {value}
+                                    </Box>
+                                  ) : column.format && value !== null ? (
+                                    column.format(value)
+                                  ) : (
+                                    value || 'N/A'
+                                  )}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        );
+                      })}
+                      {filteredData.length === 0 && !loading && (
+                        <TableRow>
+                          <TableCell colSpan={columns.length} align="center">
+                            No data available for this period
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </>
+          ) : currentView === 'campaign-mapping' ? (
+            <CampaignMapping />
+          ) : currentView === 'settings/campaign-mapping?refresh=true' ? (
+            <Button 
+              variant="contained" 
+              onClick={fetchData}
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : 'Refresh Data'}
+            </Button>
+          ) : null}
         </Container>
       </LocalizationProvider>
     </ThemeProvider>

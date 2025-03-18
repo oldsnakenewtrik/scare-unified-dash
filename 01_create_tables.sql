@@ -21,6 +21,7 @@ CREATE TABLE public.sm_dim_campaign (
     external_id VARCHAR(50) NOT NULL,
     account_id VARCHAR(50),
     account_name VARCHAR(100),
+    network VARCHAR(50),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -45,6 +46,7 @@ CREATE TABLE public.sm_fact_google_ads (
     campaign_name VARCHAR(255) NOT NULL,
     account_id VARCHAR(50) NOT NULL,
     account_name VARCHAR(100),
+    network VARCHAR(50),
     location_id INT REFERENCES public.sm_dim_location(location_id),
     
     -- Impression metrics
@@ -80,6 +82,7 @@ CREATE TABLE public.sm_fact_bing_ads (
     campaign_name VARCHAR(255) NOT NULL,
     account_id VARCHAR(50) NOT NULL,
     account_name VARCHAR(100),
+    network VARCHAR(50),
     location_id INT REFERENCES public.sm_dim_location(location_id),
     
     -- Impression metrics
@@ -160,6 +163,27 @@ CREATE TABLE public.sm_fact_redtrack (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Campaign name mapping table
+CREATE TABLE public.sm_campaign_name_mapping (
+    id SERIAL PRIMARY KEY,
+    source_system VARCHAR(50) NOT NULL,
+    external_campaign_id VARCHAR(50) NOT NULL,
+    original_campaign_name VARCHAR(255) NOT NULL,
+    pretty_campaign_name VARCHAR(255) NOT NULL,
+    campaign_category VARCHAR(100),
+    campaign_type VARCHAR(100),
+    network VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_system, external_campaign_id)
+);
+
+-- Create indexes for better performance on mapping lookups
+CREATE INDEX idx_campaign_mapping_source ON public.sm_campaign_name_mapping(source_system);
+CREATE INDEX idx_campaign_mapping_external_id ON public.sm_campaign_name_mapping(external_campaign_id);
+CREATE INDEX idx_campaign_mapping_source_id ON public.sm_campaign_name_mapping(source_system, external_campaign_id);
+
 -- Create indexes for performance
 CREATE INDEX idx_sm_google_ads_date ON public.sm_fact_google_ads(date);
 CREATE INDEX idx_sm_google_ads_campaign ON public.sm_fact_google_ads(campaign_id);
@@ -176,3 +200,5 @@ CREATE INDEX idx_sm_matomo_location ON public.sm_fact_matomo(location_id);
 CREATE INDEX idx_sm_redtrack_date ON public.sm_fact_redtrack(date);
 CREATE INDEX idx_sm_redtrack_campaign ON public.sm_fact_redtrack(campaign_id);
 CREATE INDEX idx_sm_redtrack_location ON public.sm_fact_redtrack(location_id);
+
+CREATE INDEX idx_sm_campaign_name_mapping_source ON public.sm_campaign_name_mapping(source_system, external_campaign_id);

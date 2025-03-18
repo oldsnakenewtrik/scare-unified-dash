@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Query
 
 # Load environment variables
 load_dotenv()
@@ -71,6 +72,27 @@ class CampaignMetrics(BaseModel):
     smooth_leads: int
     total_sales: int
     users: int
+
+class CampaignMappingCreate(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    pretty_campaign_name: str
+    campaign_category: Optional[str] = None
+    campaign_type: Optional[str] = None
+    network: Optional[str] = None
+
+class CampaignMapping(CampaignMappingCreate):
+    id: int
+    is_active: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+class CampaignSource(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    network: Optional[str] = None
 
 # Health check endpoint
 @app.get("/health")
@@ -277,6 +299,248 @@ def get_campaigns_metrics(db=Depends(get_db)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.get("/api/campaign-metrics")
+def get_campaign_metrics(
+    start_date: datetime.date = Query(..., description="Start date for metrics"),
+    end_date: datetime.date = Query(..., description="End date for metrics"),
+    platform: Optional[str] = Query(None, description="Filter by platform (e.g., google_ads, bing_ads)"),
+    network: Optional[str] = Query(None, description="Filter by network (e.g., Search, Display)"),
+    db=Depends(get_db)
+):
+    """
+    Get campaign metrics for the specified date range
+    """
+    try:
+        query = """
+            SELECT 
+                platform,
+                network,
+                campaign_id,
+                campaign_name,
+                original_campaign_name,
+                campaign_category,
+                campaign_type,
+                SUM(impressions) as impressions,
+                SUM(clicks) as clicks,
+                SUM(cost) as cost,
+                SUM(conversions) as conversions,
+                AVG(ctr) as ctr,
+                AVG(conversion_rate) as conversion_rate,
+                AVG(cost_per_conversion) as cost_per_conversion
+            FROM public.sm_campaign_performance
+            WHERE date BETWEEN :start_date AND :end_date
+        """
+        
+        params = {"start_date": start_date, "end_date": end_date}
+        
+        if platform:
+            query += " AND platform = :platform"
+            params["platform"] = platform
+            
+        if network:
+            query += " AND network = :network"
+            params["network"] = network
+            
+        query += """ 
+            GROUP BY 
+                platform, 
+                network,
+                campaign_id, 
+                campaign_name, 
+                original_campaign_name,
+                campaign_category,
+                campaign_type
+            ORDER BY cost DESC
+        """
+        
+        result = db.execute(text(query), params)
+        campaigns = []
+        
+        for row in result:
+            campaign = dict(row)
+            # Format numeric values for JSON response
+            campaign["impressions"] = int(campaign["impressions"]) if campaign["impressions"] else 0
+            campaign["clicks"] = int(campaign["clicks"]) if campaign["clicks"] else 0
+            campaign["cost"] = float(campaign["cost"]) if campaign["cost"] else 0.0
+            campaign["conversions"] = float(campaign["conversions"]) if campaign["conversions"] else 0.0
+            campaign["ctr"] = float(campaign["ctr"]) if campaign["ctr"] else 0.0
+            campaign["conversion_rate"] = float(campaign["conversion_rate"]) if campaign["conversion_rate"] else 0.0
+            campaign["cost_per_conversion"] = float(campaign["cost_per_conversion"]) if campaign["cost_per_conversion"] else 0.0
+            
+            campaigns.append(campaign)
+            
+        return campaigns
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Campaign mapping endpoints
+@app.get("/api/campaign-mappings", response_model=List[CampaignMapping])
+def get_campaign_mappings(source_system: Optional[str] = None, db=Depends(get_db)):
+    """
+    Get all campaign mappings with optional filtering by source system
+    """
+    try:
+        query = """
+            SELECT * FROM public.sm_campaign_name_mapping
+            WHERE is_active = TRUE
+        """
+        
+        if source_system:
+            query += f" AND source_system = '{source_system}'"
+            
+        query += " ORDER BY source_system, original_campaign_name"
+        
+        result = db.execute(text(query))
+        mappings = [dict(row) for row in result]
+        
+        return mappings
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/unmapped-campaigns", response_model=List[CampaignSource])
+def get_unmapped_campaigns(db=Depends(get_db)):
+    """
+    Get unique campaign sources that aren't yet mapped to pretty names
+    """
+    try:
+        query = """
+        WITH all_campaigns AS (
+            -- Google Ads campaigns
+            SELECT 'Google Ads' as source_system, campaign_id::VARCHAR as external_campaign_id, 
+                   campaign_name as original_campaign_name, network
+            FROM public.sm_fact_google_ads
+            GROUP BY source_system, campaign_id, campaign_name, network
+            
+            UNION
+            
+            -- Bing Ads campaigns
+            SELECT 'Bing Ads' as source_system, campaign_id::VARCHAR as external_campaign_id, 
+                   campaign_name as original_campaign_name, network
+            FROM public.sm_fact_bing_ads
+            GROUP BY source_system, campaign_id, campaign_name, network
+            
+            UNION
+            
+            -- RedTrack campaigns - no default network
+            SELECT 'RedTrack' as source_system, campaign_id::VARCHAR as external_campaign_id, 
+                   campaign_name as original_campaign_name, NULL as network
+            FROM public.sm_fact_redtrack
+            GROUP BY source_system, campaign_id, campaign_name
+            
+            UNION
+            
+            -- Matomo campaigns - no default network
+            SELECT 'Matomo' as source_system, campaign_id::VARCHAR as external_campaign_id, 
+                   campaign_name as original_campaign_name, NULL as network
+            FROM public.sm_fact_matomo
+            WHERE campaign_id IS NOT NULL AND campaign_name IS NOT NULL
+            GROUP BY source_system, campaign_id, campaign_name
+        )
+        
+        SELECT ac.* FROM all_campaigns ac
+        LEFT JOIN public.sm_campaign_name_mapping m 
+            ON ac.source_system = m.source_system 
+            AND ac.external_campaign_id = m.external_campaign_id
+        WHERE m.id IS NULL
+        ORDER BY ac.source_system, ac.original_campaign_name;
+        """
+        
+        result = db.execute(text(query))
+        unmapped = [dict(row) for row in result]
+        
+        return unmapped
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/campaign-mappings", response_model=CampaignMapping)
+def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
+    """
+    Create a new campaign mapping
+    """
+    try:
+        # Check if a mapping already exists for this source/id
+        check_query = """
+            SELECT id FROM public.sm_campaign_name_mapping
+            WHERE source_system = :source_system AND external_campaign_id = :external_campaign_id
+        """
+        
+        existing = db.execute(
+            text(check_query), 
+            {"source_system": mapping.source_system, "external_campaign_id": mapping.external_campaign_id}
+        ).fetchone()
+        
+        if existing:
+            # Update if it exists
+            query = """
+                UPDATE public.sm_campaign_name_mapping
+                SET pretty_campaign_name = :pretty_campaign_name,
+                    campaign_category = :campaign_category,
+                    campaign_type = :campaign_type,
+                    is_active = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                RETURNING *
+            """
+            
+            result = db.execute(
+                text(query),
+                {
+                    "pretty_campaign_name": mapping.pretty_campaign_name,
+                    "campaign_category": mapping.campaign_category,
+                    "campaign_type": mapping.campaign_type,
+                    "id": existing.id
+                }
+            ).fetchone()
+            
+        else:
+            # Insert if it doesn't exist
+            query = """
+                INSERT INTO public.sm_campaign_name_mapping
+                (source_system, external_campaign_id, original_campaign_name, pretty_campaign_name, campaign_category, campaign_type)
+                VALUES
+                (:source_system, :external_campaign_id, :original_campaign_name, :pretty_campaign_name, :campaign_category, :campaign_type)
+                RETURNING *
+            """
+            
+            result = db.execute(
+                text(query),
+                {
+                    "source_system": mapping.source_system,
+                    "external_campaign_id": mapping.external_campaign_id,
+                    "original_campaign_name": mapping.original_campaign_name,
+                    "pretty_campaign_name": mapping.pretty_campaign_name,
+                    "campaign_category": mapping.campaign_category,
+                    "campaign_type": mapping.campaign_type
+                }
+            ).fetchone()
+        
+        db.commit()
+        
+        return dict(result)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/campaign-mappings/{mapping_id}")
+def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
+    """
+    Delete a campaign mapping (soft delete by setting is_active to false)
+    """
+    try:
+        query = """
+            UPDATE public.sm_campaign_name_mapping
+            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        """
+        
+        db.execute(text(query), {"id": mapping_id})
+        db.commit()
+        
+        return {"message": "Mapping deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

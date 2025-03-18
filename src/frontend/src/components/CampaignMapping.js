@@ -1,0 +1,482 @@
+import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import {
+  Box,
+  Typography,
+  Paper,
+  Tabs,
+  Tab,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Snackbar,
+  Alert,
+  Autocomplete,
+  IconButton
+} from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import axios from 'axios';
+
+// API base URL (set in .env)
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+
+// Campaign data sources
+const DATA_SOURCES = ['Google Ads', 'Bing Ads', 'RedTrack', 'Matomo'];
+
+// Campaign categories and types for dropdown selections
+const CAMPAIGN_CATEGORIES = ['Brand', 'Non-Brand', 'Display', 'Social', 'Affiliate', 'Email', 'Other'];
+const CAMPAIGN_TYPES = ['Search', 'Display', 'Video', 'Shopping', 'App', 'Smart', 'Discovery', 'Performance Max', 'Other'];
+const NETWORKS = [
+  'Search', 
+  'Display', 
+  'Shopping', 
+  'Video', 
+  'Social', 
+  'Affiliate', 
+  'Email', 
+  'Organic', 
+  'Referral',
+  'Direct',
+  'Paid Social',
+  'Native',
+  'Other'
+];
+
+function CampaignMapping() {
+  // Get URL parameters
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const shouldRefresh = searchParams.get('refresh') === 'true';
+
+  // State variables
+  const [activeTab, setActiveTab] = useState(0);
+  const [mappedCampaigns, setMappedCampaigns] = useState([]);
+  const [unmappedCampaigns, setUnmappedCampaigns] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [currentMapping, setCurrentMapping] = useState({
+    source_system: '',
+    external_campaign_id: '',
+    original_campaign_name: '',
+    pretty_campaign_name: '',
+    campaign_category: '',
+    campaign_type: '',
+    network: ''
+  });
+
+  // Helper function to get source name from tab index
+  const getSourceFromTabIndex = (index) => {
+    return DATA_SOURCES[index] || 'All';
+  };
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Handle auto-refresh if URL parameter is present
+  useEffect(() => {
+    if (shouldRefresh) {
+      handleRefreshUnmappedCampaigns();
+      // Clear the URL parameter after refreshing
+      window.history.replaceState({}, '', location.pathname);
+    }
+  }, [shouldRefresh]);
+
+  // Load data on component mount and tab change
+  useEffect(() => {
+    fetchData();
+  }, [activeTab]);
+
+  // Function to fetch data from API
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Get source system from active tab
+      const sourceSystem = getSourceFromTabIndex(activeTab) !== 'All' ? getSourceFromTabIndex(activeTab) : null;
+      
+      // Fetch all mapped campaigns with optional filter
+      const mappedResponse = await axios.get(`${API_BASE_URL}/api/campaign-mappings`, {
+        params: { source_system: sourceSystem }
+      });
+      
+      // Fetch all unmapped campaigns
+      const unmappedResponse = await axios.get(`${API_BASE_URL}/api/unmapped-campaigns`);
+      
+      // Filter unmapped campaigns by source if needed
+      const allUnmapped = unmappedResponse.data;
+      const filteredUnmapped = sourceSystem 
+        ? allUnmapped.filter(c => c.source_system === sourceSystem)
+        : allUnmapped;
+      
+      setMappedCampaigns(mappedResponse.data);
+      setUnmappedCampaigns(filteredUnmapped);
+    } catch (err) {
+      console.error('Error fetching campaign mapping data:', err);
+      setError('Failed to fetch campaign data. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle tab change
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  // Open dialog for creating a new mapping
+  const handleCreateMapping = (campaign) => {
+    setCurrentMapping({
+      source_system: campaign.source_system,
+      external_campaign_id: campaign.external_campaign_id,
+      original_campaign_name: campaign.original_campaign_name,
+      pretty_campaign_name: campaign.original_campaign_name, // Default to original name
+      campaign_category: '',
+      campaign_type: '',
+      network: campaign.network || ''
+    });
+    setDialogOpen(true);
+  };
+
+  // Handle input changes for creating a new mapping
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setCurrentMapping(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Helper function to handle network input - allow custom values
+  const handleNetworkInputChange = (event, newValue) => {
+    // If it's a string (custom value) or a selected item from dropdown
+    setCurrentMapping(prev => ({
+      ...prev,
+      network: newValue
+    }));
+  };
+
+  // Save mapping to database
+  const handleSaveMapping = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/api/campaign-mappings`, currentMapping);
+      setDialogOpen(false);
+      setSuccess('Campaign mapping saved successfully!');
+      fetchData(); // Refresh data
+    } catch (err) {
+      console.error('Error saving campaign mapping:', err);
+      setError('Failed to save campaign mapping. Please try again.');
+    }
+  };
+
+  // Delete mapping from database
+  const handleDeleteMapping = async (mappingId) => {
+    if (window.confirm('Are you sure you want to delete this mapping?')) {
+      try {
+        await axios.delete(`${API_BASE_URL}/api/campaign-mappings/${mappingId}`);
+        setSuccess('Campaign mapping deleted successfully!');
+        fetchData(); // Refresh data
+      } catch (err) {
+        console.error('Error deleting campaign mapping:', err);
+        setError('Failed to delete campaign mapping. Please try again.');
+      }
+    }
+  };
+
+  // Close snackbar alerts
+  const handleCloseAlert = () => {
+    setSuccess(null);
+    setError(null);
+  };
+
+  const handleRefreshUnmappedCampaigns = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Fetch all unmapped campaigns
+      const unmappedResponse = await axios.get(`${API_BASE_URL}/api/unmapped-campaigns`);
+      
+      // Filter unmapped campaigns by source if needed
+      const allUnmapped = unmappedResponse.data;
+      const filteredUnmapped = activeTab !== 0 
+        ? allUnmapped.filter(c => c.source_system === DATA_SOURCES[activeTab - 1])
+        : allUnmapped;
+      
+      setUnmappedCampaigns(filteredUnmapped);
+    } catch (err) {
+      console.error('Error fetching unmapped campaigns:', err);
+      setError('Failed to fetch unmapped campaigns. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Box sx={{ width: '100%', mt: 3 }}>
+      <Paper sx={{ width: '100%', mb: 2 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={handleTabChange} 
+            aria-label="campaign source tabs"
+            variant="scrollable"
+            scrollButtons="auto"
+          >
+            {DATA_SOURCES.map((source, index) => (
+              <Tab key={index} label={source} />
+            ))}
+          </Tabs>
+        </Box>
+
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom component="div">
+            Campaign Name Mapping - {getSourceFromTabIndex(activeTab)}
+          </Typography>
+          
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              {/* Unmapped Campaigns Section */}
+              <Box sx={{ mb: 4 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6">
+                    Unmapped Campaigns
+                  </Typography>
+                  <IconButton 
+                    color="primary" 
+                    onClick={handleRefreshUnmappedCampaigns} 
+                    title="Refresh unmapped campaigns"
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Box>
+                
+                {unmappedCampaigns.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No unmapped campaigns found. All campaigns have been assigned pretty names.
+                  </Typography>
+                ) : (
+                  <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
+                    <Table stickyHeader size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Campaign Name</TableCell>
+                          <TableCell>Source System</TableCell>
+                          <TableCell>Network</TableCell>
+                          <TableCell>External ID</TableCell>
+                          <TableCell align="right">Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {unmappedCampaigns.map((campaign) => (
+                          <TableRow key={`${campaign.source_system}-${campaign.external_campaign_id}`}>
+                            <TableCell>{campaign.original_campaign_name}</TableCell>
+                            <TableCell>{campaign.source_system}</TableCell>
+                            <TableCell>{campaign.network || 'Unknown'}</TableCell>
+                            <TableCell>{campaign.external_campaign_id}</TableCell>
+                            <TableCell align="right">
+                              <Button 
+                                variant="contained" 
+                                size="small"
+                                onClick={() => handleCreateMapping(campaign)}
+                              >
+                                Map
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+              
+              {/* Mapped Campaigns Section */}
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Mapped Campaigns
+                </Typography>
+                
+                {mappedCampaigns.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No campaign mappings found. Map campaigns from the unmapped list above.
+                  </Typography>
+                ) : (
+                  <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+                    <Table stickyHeader size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Original Campaign Name</TableCell>
+                          <TableCell>Pretty Campaign Name</TableCell>
+                          <TableCell>Category</TableCell>
+                          <TableCell>Type</TableCell>
+                          <TableCell>Source System</TableCell>
+                          <TableCell>Network</TableCell>
+                          <TableCell align="right">Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {mappedCampaigns.map((mapping) => (
+                          <TableRow key={mapping.id}>
+                            <TableCell>{mapping.original_campaign_name}</TableCell>
+                            <TableCell>{mapping.pretty_campaign_name}</TableCell>
+                            <TableCell>{mapping.campaign_category || 'Uncategorized'}</TableCell>
+                            <TableCell>{mapping.campaign_type || 'Uncategorized'}</TableCell>
+                            <TableCell>{mapping.source_system}</TableCell>
+                            <TableCell>{mapping.network || 'Unknown'}</TableCell>
+                            <TableCell align="right">
+                              <Button 
+                                variant="outlined" 
+                                color="secondary" 
+                                size="small"
+                                onClick={() => handleDeleteMapping(mapping.id)}
+                              >
+                                Delete
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
+            </>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Dialog for creating/editing mappings */}
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Map Campaign Name</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <TextField
+              label="Source System"
+              value={currentMapping.source_system}
+              disabled
+              fullWidth
+            />
+            
+            <TextField
+              label="External Campaign ID"
+              value={currentMapping.external_campaign_id}
+              disabled
+              fullWidth
+            />
+            
+            <TextField
+              label="Original Campaign Name"
+              value={currentMapping.original_campaign_name}
+              disabled
+              fullWidth
+            />
+            
+            <TextField
+              label="Pretty Campaign Name"
+              name="pretty_campaign_name"
+              value={currentMapping.pretty_campaign_name}
+              onChange={handleInputChange}
+              required
+              fullWidth
+            />
+            
+            <FormControl fullWidth>
+              <InputLabel>Campaign Category</InputLabel>
+              <Select
+                name="campaign_category"
+                value={currentMapping.campaign_category}
+                onChange={handleInputChange}
+                label="Campaign Category"
+              >
+                {CAMPAIGN_CATEGORIES.map((category) => (
+                  <MenuItem key={category} value={category}>{category}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            
+            <FormControl fullWidth>
+              <InputLabel>Campaign Type</InputLabel>
+              <Select
+                name="campaign_type"
+                value={currentMapping.campaign_type}
+                onChange={handleInputChange}
+                label="Campaign Type"
+              >
+                {CAMPAIGN_TYPES.map((type) => (
+                  <MenuItem key={type} value={type}>{type}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            
+            <FormControl fullWidth>
+              <InputLabel>Network</InputLabel>
+              <Autocomplete
+                freeSolo
+                options={NETWORKS}
+                value={currentMapping.network || ''}
+                onChange={handleNetworkInputChange}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Network"
+                    name="network"
+                    variant="outlined"
+                    fullWidth
+                  />
+                )}
+              />
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleSaveMapping} 
+            variant="contained" 
+            disabled={!currentMapping.pretty_campaign_name}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success and error snackbars */}
+      <Snackbar open={!!success} autoHideDuration={6000} onClose={handleCloseAlert}>
+        <Alert onClose={handleCloseAlert} severity="success" sx={{ width: '100%' }}>
+          {success}
+        </Alert>
+      </Snackbar>
+      
+      <Snackbar open={!!error} autoHideDuration={6000} onClose={handleCloseAlert}>
+        <Alert onClose={handleCloseAlert} severity="error" sx={{ width: '100%' }}>
+          {error}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}
+
+export default CampaignMapping;
