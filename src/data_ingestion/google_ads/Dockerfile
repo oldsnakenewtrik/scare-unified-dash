@@ -19,5 +19,5 @@ RUN chmod +x /app/railway_entrypoint.sh && \
 
 ENTRYPOINT ["/bin/bash", "/app/railway_entrypoint.sh"]
 
-# Default command (can be overridden)
-CMD ["etl", "7"]
+# Using schedule as default for cron jobs
+CMD ["schedule"]

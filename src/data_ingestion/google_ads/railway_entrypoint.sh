@@ -1,8 +1,14 @@
 #!/bin/bash
 
-set -e
+# Enable logging to file for debugging cron issues
+LOGFILE="/tmp/google_ads_cron.log"
+exec > >(tee -a ${LOGFILE})
+exec 2>&1
 
 echo "========== RAILWAY ENTRYPOINT SCRIPT =========="
+echo "Started at: $(date)"
+echo "Args: $@"
+echo "Command: $0"
 echo "Running in Railway environment..."
 echo "Current directory: $(pwd)"
 echo "Listing files in current directory:"
@@ -76,10 +82,17 @@ else
     echo $PATH
     echo "Trying to execute Python directly:"
     python --version
+    # List all python files anywhere in the system
+    echo "Searching for main.py in entire filesystem:"
+    find / -name "main.py" 2>/dev/null
     exit 1
 fi
 
 echo "Using scripts from: ${SCRIPT_DIR}"
+
+# SPECIAL HANDLING FOR CRON
+echo "Environment variables:"
+env | grep -v PASSWORD | grep -v SECRET | grep -v TOKEN
 
 # Determine the command to run
 case "$1" in
@@ -97,15 +110,15 @@ case "$1" in
         python ${SCRIPT_DIR}/main.py --days-back "${2:-7}"
         ;;
     schedule)
-        echo "Running scheduled ETL process..."
+        echo "Running scheduled ETL process via cron..."
         python ${SCRIPT_DIR}/main.py --schedule
         ;;
-    shell)
-        echo "Starting interactive shell..."
-        /bin/bash
-        ;;
     *)
-        echo "Usage: $0 {fetch|import|etl|schedule|shell}"
-        exit 1
+        echo "No specific command provided, defaulting to ETL process..."
+        echo "Command: python ${SCRIPT_DIR}/main.py --days-back 7"
+        python ${SCRIPT_DIR}/main.py --days-back 7
         ;;
 esac
+
+echo "Script completed at: $(date)"
+echo "Check log file at: ${LOGFILE}"
