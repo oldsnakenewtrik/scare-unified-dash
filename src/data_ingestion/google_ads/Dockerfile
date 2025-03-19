@@ -11,9 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY . .
 
 # Make the entry point script executable
-RUN chmod +x /app/docker_entrypoint.sh
+RUN chmod +x /app/railway_entrypoint.sh
 
-ENTRYPOINT ["/app/docker_entrypoint.sh"]
+ENTRYPOINT ["/app/railway_entrypoint.sh"]
 
 # Default command (can be overridden)
 CMD ["etl", "7"]
