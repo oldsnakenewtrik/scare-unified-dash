@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -33,14 +34,23 @@ except Exception as e:
 app = FastAPI(title="SCARE Unified Metrics API")
 
 # Configure CORS to allow any origin
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://front-production-f6e6.up.railway.app",
+    "https://scare-unified-dash-production.up.railway.app",
+    "*"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-    expose_headers=["*"],  # Expose all headers
-    max_age=3600,         # Cache preflight requests for 1 hour
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Dependency
@@ -903,31 +913,75 @@ def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db))
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.options("/api/admin/clear_google_ads_mappings")
+async def options_clear_google_ads_mappings():
+    return handle_cors_preflight()
+
+@app.options("/api/admin/import_real_google_ads_data")
+async def options_import_real_google_ads_data():
+    return handle_cors_preflight()
+
+def handle_cors_preflight():
+    """Handle CORS preflight requests with appropriate headers"""
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Max-Age": "3600",
+    }
+    return JSONResponse(content={}, headers=headers)
+
 @app.post("/api/admin/clear_google_ads_mappings")
 def admin_clear_google_ads_mappings(db=Depends(get_db)):
     """Clear all Google Ads campaign mappings"""
     from admin_commands import clear_google_ads_mappings
     
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
+    
     try:
         logger.info("Admin endpoint: clear_google_ads_mappings called")
         success = clear_google_ads_mappings(db)
-        return {"success": success}
+        return JSONResponse(
+            content={"success": success},
+            headers=headers
+        )
     except Exception as e:
         logger.error(f"Error in clear_google_ads_mappings endpoint: {str(e)}")
-        return {"success": False, "error": str(e)}
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500,
+            headers=headers
+        )
 
 @app.post("/api/admin/import_real_google_ads_data")
 def admin_import_real_google_ads_data(data: dict = Body(None), db=Depends(get_db)):
     """Import real Google Ads data"""
     from admin_commands import import_real_google_ads_data
-    logger.info(f"Admin endpoint: import_real_google_ads_data called with data: {type(data)}")
+    
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
     
     try:
+        logger.info(f"Admin endpoint: import_real_google_ads_data called with data: {type(data)}")
         success = import_real_google_ads_data(db, data)
-        return {"success": success}
+        return JSONResponse(
+            content={"success": success},
+            headers=headers
+        )
     except Exception as e:
         logger.error(f"Error in import_real_google_ads_data endpoint: {str(e)}")
-        return {"success": False, "error": str(e)}
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500,
+            headers=headers
+        )
 
 @app.get("/api/google-ads/campaigns")
 def get_google_ads_campaigns(db=Depends(get_db)):
