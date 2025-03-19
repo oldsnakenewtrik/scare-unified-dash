@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -7,8 +8,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import List, Optional
 import datetime
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Query
 import logging
 
 # Set up logging
@@ -595,8 +594,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 sm_fact_google_ads g
             LEFT JOIN 
                 sm_campaign_name_mapping m ON 
-                CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id AND 
-                m.source_system = 'Google Ads'
+                CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
+                AND m.source_system = 'Google Ads'
             WHERE 
                 m.id IS NULL
         """
@@ -611,8 +610,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 sm_fact_bing_ads b
             LEFT JOIN 
                 sm_campaign_name_mapping m ON 
-                CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id AND 
-                m.source_system = 'Bing Ads'
+                CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
+                AND m.source_system = 'Bing Ads'
             WHERE 
                 m.id IS NULL
         """
@@ -627,8 +626,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 sm_fact_redtrack r
             LEFT JOIN 
                 sm_campaign_name_mapping m ON 
-                CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id AND 
-                m.source_system = 'RedTrack'
+                CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
+                AND m.source_system = 'RedTrack'
             WHERE 
                 m.id IS NULL
         """
@@ -643,8 +642,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 sm_fact_matomo mt
             LEFT JOIN 
                 sm_campaign_name_mapping m ON 
-                CAST(mt.campaign_id AS VARCHAR) = m.external_campaign_id AND 
-                m.source_system = 'Matomo'
+                CAST(mt.campaign_id AS VARCHAR) = m.external_campaign_id 
+                AND m.source_system = 'Matomo'
             WHERE 
                 m.id IS NULL
         """
@@ -911,12 +910,56 @@ def admin_clear_google_ads_mappings(db=Depends(get_db)):
     return {"success": success}
 
 @app.post("/api/admin/import_real_google_ads_data")
-def admin_import_real_google_ads_data(data: dict = Body(...), db=Depends(get_db)):
+def admin_import_real_google_ads_data(data: dict = Body(None), db=Depends(get_db)):
     """Import real Google Ads data"""
     from admin_commands import import_real_google_ads_data
-    logger.info("Admin endpoint: import_real_google_ads_data called")
-    success = import_real_google_ads_data(db, data)
-    return {"success": success}
+    logger.info(f"Admin endpoint: import_real_google_ads_data called with data: {type(data)}")
+    
+    try:
+        success = import_real_google_ads_data(db, data)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Error in import_real_google_ads_data endpoint: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/google-ads/campaigns")
+def get_google_ads_campaigns(db=Depends(get_db)):
+    """Get all Google Ads campaigns"""
+    logger.info("Endpoint called: get_google_ads_campaigns")
+    try:
+        # Query Google Ads campaigns from the database
+        query = """
+        SELECT 
+            c.id, 
+            c.campaign_id as campaign_id, 
+            c.name as campaign_name,
+            c.pretty_campaign_name,
+            c.campaign_type,
+            c.network
+        FROM fact_google_ads_campaign c
+        ORDER BY c.name
+        """
+        
+        result = db.execute(text(query)).fetchall()
+        
+        # Convert to list of dictionaries
+        campaigns = []
+        for row in result:
+            campaign = {
+                "id": row[0],
+                "campaign_id": row[1],
+                "campaign_name": row[2],
+                "pretty_campaign_name": row[3],
+                "campaign_type": row[4],
+                "network": row[5]
+            }
+            campaigns.append(campaign)
+        
+        logger.info(f"Retrieved {len(campaigns)} Google Ads campaigns")
+        return campaigns
+    except Exception as e:
+        logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

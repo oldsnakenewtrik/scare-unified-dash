@@ -47,11 +47,11 @@ def clear_google_ads_mappings(db: Session):
         db.rollback()
         return False
 
-def import_real_google_ads_data(db: Session, file_path=None):
-    """Import real Google Ads data from JSON file or sample data for testing"""
+def import_real_google_ads_data(db: Session, data=None):
+    """Import real Google Ads data from JSON file, direct data object, or sample data for testing"""
     try:
-        # Use sample data if no file path provided
-        if not file_path:
+        # Use sample data if no data provided
+        if not data:
             # Create sample data based on real campaign naming patterns
             data = [
                 {
@@ -101,11 +101,20 @@ def import_real_google_ads_data(db: Session, file_path=None):
                 }
             ]
             logger.info(f"Using sample data with {len(data)} records")
-        else:
-            # Load data from file
-            with open(file_path, 'r') as f:
+        elif isinstance(data, str) and os.path.exists(data):
+            # If data is a string and exists as a file path
+            with open(data, 'r') as f:
                 data = json.load(f)
-            logger.info(f"Loaded {len(data)} records from {file_path}")
+            logger.info(f"Loaded {len(data)} records from file: {data}")
+        else:
+            # Data is passed as a direct object
+            if isinstance(data, dict) and 'response' in data:
+                # Extract data from the standard Google Ads JSON format
+                data = data.get('response', [])
+            elif isinstance(data, dict) and not isinstance(next(iter(data.values()), None), (dict, list)):
+                # Single record as dict
+                data = [data]
+            logger.info(f"Using provided data with {len(data)} records")
         
         # First clear existing Google Ads data
         clear_query = text("DELETE FROM sm_fact_google_ads")
