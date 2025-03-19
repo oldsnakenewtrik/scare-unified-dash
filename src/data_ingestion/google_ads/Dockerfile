@@ -21,22 +21,30 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     psycopg2-binary==2.9.6 \
     google-ads==21.2.0 \
     python-dotenv==1.0.0 \
-    schedule==1.2.0
+    schedule==1.2.0 \
+    pyyaml==6.0.1
 
 # Copy the application code
 COPY . .
 
-# Make the entry point script executable - with extra safety measures
+# Copy the improved entrypoint script
+COPY improved_entrypoint.sh /app/improved_entrypoint.sh
+
+# Make the entry point scripts executable
 RUN chmod +x /app/railway_entrypoint.sh && \
-    # Double check file exists
+    chmod +x /app/improved_entrypoint.sh && \
+    # Double check files exist
     ls -la /app/railway_entrypoint.sh && \
-    # Ensure the file has Unix line endings
-    sed -i 's/\r$//' /app/railway_entrypoint.sh
+    ls -la /app/improved_entrypoint.sh && \
+    # Ensure the files have Unix line endings
+    sed -i 's/\r$//' /app/railway_entrypoint.sh && \
+    sed -i 's/\r$//' /app/improved_entrypoint.sh
 
 # Create log directory
 RUN mkdir -p /var/log/google_ads
 
-ENTRYPOINT ["/bin/bash", "/app/railway_entrypoint.sh"]
+# Use our improved entrypoint script
+ENTRYPOINT ["/bin/bash", "/app/improved_entrypoint.sh"]
 
 # Using schedule as default for cron jobs
 CMD ["schedule"]
