@@ -44,19 +44,19 @@ sys.exit(1)
 case "$1" in
     fetch)
         echo "Running fetch-only mode..."
-        python /app/src/data_ingestion/google_ads/fetch_only.py
+        python /app/fetch_only.py
         ;;
     import)
         echo "Running import mode..."
-        python /app/src/data_ingestion/google_ads/import_from_json.py "${2:-google_ads_data.json}"
+        python /app/import_from_json.py "${2:-google_ads_data.json}"
         ;;
     etl)
         echo "Running full ETL process..."
-        python /app/src/data_ingestion/google_ads/main.py --days-back "${2:-7}"
+        python /app/main.py --days-back "${2:-7}"
         ;;
     schedule)
         echo "Running scheduled ETL process..."
-        python /app/src/data_ingestion/google_ads/main.py --schedule
+        python /app/main.py --schedule
         ;;
     shell)
         echo "Starting interactive shell..."
