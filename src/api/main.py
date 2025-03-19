@@ -19,23 +19,23 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Run database migrations on startup
+# Run database initialization (creates tables and runs migrations)
 try:
-    from run_db_migrations import run_migrations
-    run_migrations(engine)
+    from db_init import init_database
+    init_database()
 except Exception as e:
-    print(f"Warning: Failed to run database migrations: {str(e)}")
+    print(f"Warning: Failed to initialize database: {str(e)}")
     print("Application will continue to start, but some features may not work correctly")
 
 app = FastAPI(title="SCARE Unified Metrics API")
 
-# Configure CORS
+# Configure CORS to allow any origin
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins during development
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Dependency
@@ -133,10 +133,32 @@ class UnmappedCampaign(BaseModel):
     campaign_name: str
     network: Optional[str] = None
 
-# Health check endpoint
+# Health check endpoint for verifying server status
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "timestamp": datetime.datetime.now()}
+    """Health check endpoint to verify server status"""
+    # Add database schema check
+    db_status = "unknown"
+    try:
+        with engine.connect() as conn:
+            # Check if the tables exist
+            result = conn.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"))
+            tables = [row[0] for row in result]
+            required_tables = ['sm_campaign_name_mapping', 'sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack']
+            missing_tables = [table for table in required_tables if table not in tables]
+            
+            if missing_tables:
+                db_status = f"missing tables: {', '.join(missing_tables)}"
+            else:
+                db_status = "healthy"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "database_status": db_status
+    }
 
 # API endpoints
 @app.get("/api/metrics/summary", response_model=List[MetricsSummary])
