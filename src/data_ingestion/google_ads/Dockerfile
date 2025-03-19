@@ -10,11 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy the application code
 COPY . .
 
-# Copy the entry point script and make it executable
-COPY docker_entrypoint.sh /docker_entrypoint.sh
-RUN chmod +x /docker_entrypoint.sh
+# Make the entry point script executable
+RUN chmod +x /app/docker_entrypoint.sh
 
-ENTRYPOINT ["/docker_entrypoint.sh"]
+ENTRYPOINT ["/app/docker_entrypoint.sh"]
 
 # Default command (can be overridden)
 CMD ["etl", "7"]
