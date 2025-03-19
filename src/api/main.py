@@ -186,7 +186,7 @@ def get_metrics_summary(start_date: datetime.date, end_date: datetime.date, db=D
         """)
         
         result = db.execute(query, {"start_date": start_date, "end_date": end_date})
-        metrics = [dict(row) for row in result]
+        metrics = [dict(row._mapping) for row in result]
         
         return metrics
     except Exception as e:
@@ -213,7 +213,7 @@ def get_metrics_by_source(start_date: datetime.date, end_date: datetime.date, db
         """)
         
         result = db.execute(query, {"start_date": start_date, "end_date": end_date})
-        metrics = [dict(row) for row in result]
+        metrics = [dict(row._mapping) for row in result]
         
         return metrics
     except Exception as e:
@@ -241,7 +241,7 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
         """)
         
         result = db.execute(query, {"start_date": start_date, "end_date": end_date})
-        metrics = [dict(row) for row in result]
+        metrics = [dict(row._mapping) for row in result]
         
         return metrics
     except Exception as e:
@@ -419,7 +419,7 @@ def get_campaign_metrics(
         campaigns = []
         
         for row in result:
-            campaign = dict(row)
+            campaign = dict(row._mapping)
             # Format numeric values for JSON response
             campaign["impressions"] = int(campaign["impressions"]) if campaign["impressions"] else 0
             campaign["clicks"] = int(campaign["clicks"]) if campaign["clicks"] else 0
@@ -453,7 +453,7 @@ def get_campaign_mappings(source_system: Optional[str] = None, db=Depends(get_db
         query += " ORDER BY source_system, original_campaign_name"
         
         result = db.execute(text(query))
-        mappings = [dict(row) for row in result]
+        mappings = [dict(row._mapping) for row in result]
         
         return mappings
     except Exception as e:
@@ -544,7 +544,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
         """
         
         result = db.execute(text(union_query)).fetchall()
-        return [dict(row) for row in result]
+        return [dict(row._mapping) for row in result]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch unmapped campaigns: {str(e)}")
 
@@ -687,7 +687,9 @@ def get_hierarchical_campaigns(db=Depends(get_db)):
         """
         
         result = db.execute(text(query)).fetchall()
-        return [dict(row) for row in result]
+        
+        # Convert SQLAlchemy Row objects to dictionaries using dict() constructor
+        return [dict(row._mapping) for row in result]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
