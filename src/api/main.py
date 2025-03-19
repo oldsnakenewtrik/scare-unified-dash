@@ -39,6 +39,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
+    expose_headers=["*"],  # Expose all headers
+    max_age=3600,         # Cache preflight requests for 1 hour
 )
 
 # Dependency
@@ -849,7 +851,7 @@ def get_hierarchical_campaigns(db=Depends(get_db)):
         
         result = db.execute(text(query)).fetchall()
         
-        # Convert SQLAlchemy Row objects to dictionaries using dict() constructor
+        # Convert to list of dictionaries
         return [dict(row._mapping) for row in result]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -905,9 +907,14 @@ def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db))
 def admin_clear_google_ads_mappings(db=Depends(get_db)):
     """Clear all Google Ads campaign mappings"""
     from admin_commands import clear_google_ads_mappings
-    logger.info("Admin endpoint: clear_google_ads_mappings called")
-    success = clear_google_ads_mappings(db)
-    return {"success": success}
+    
+    try:
+        logger.info("Admin endpoint: clear_google_ads_mappings called")
+        success = clear_google_ads_mappings(db)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Error in clear_google_ads_mappings endpoint: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 @app.post("/api/admin/import_real_google_ads_data")
 def admin_import_real_google_ads_data(data: dict = Body(None), db=Depends(get_db)):
@@ -928,19 +935,25 @@ def get_google_ads_campaigns(db=Depends(get_db)):
     logger.info("Endpoint called: get_google_ads_campaigns")
     try:
         # Query Google Ads campaigns from the database
-        query = """
+        query = text("""
         SELECT 
-            c.id, 
-            c.campaign_id as campaign_id, 
-            c.name as campaign_name,
-            c.pretty_campaign_name,
-            c.campaign_type,
-            c.network
-        FROM fact_google_ads_campaign c
-        ORDER BY c.name
-        """
+            id, 
+            campaign_id, 
+            campaign_name,
+            COALESCE(campaign_name, '') as pretty_campaign_name,
+            '' as campaign_type,
+            '' as network
+        FROM (
+            SELECT DISTINCT
+                id,
+                campaign_id,
+                campaign_name
+            FROM sm_fact_google_ads
+        ) c
+        ORDER BY campaign_name
+        """)
         
-        result = db.execute(text(query)).fetchall()
+        result = db.execute(query).fetchall()
         
         # Convert to list of dictionaries
         campaigns = []
