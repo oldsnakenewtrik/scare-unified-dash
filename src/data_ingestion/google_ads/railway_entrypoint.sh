@@ -2,13 +2,25 @@
 
 set -e
 
+echo "========== RAILWAY ENTRYPOINT SCRIPT =========="
 echo "Running in Railway environment..."
 echo "Current directory: $(pwd)"
+echo "Listing files in current directory:"
+ls -la
 echo "Listing files in app directory:"
-ls -la /app
-echo "Checking for main.py in multiple locations:"
-[ -f /app/main.py ] && echo "Found /app/main.py" || echo "Not found: /app/main.py"
-[ -f main.py ] && echo "Found main.py in current directory" || echo "Not found: main.py in current directory"
+ls -la /app || echo "Cannot access /app directory"
+
+# Create a fallback directory where we'll copy everything
+mkdir -p /tmp/google_ads_scripts
+echo "Created fallback directory at /tmp/google_ads_scripts"
+
+# Copy all Python files to the fallback directory
+echo "Copying Python files to fallback directory..."
+find /app -name "*.py" -exec cp {} /tmp/google_ads_scripts/ \; || echo "Failed to copy files from /app"
+find . -name "*.py" -exec cp {} /tmp/google_ads_scripts/ \; || echo "Failed to copy files from current directory"
+
+echo "Contents of fallback directory:"
+ls -la /tmp/google_ads_scripts
 
 # Wait for database to be ready (for Docker/Railway deployment)
 echo "Waiting for database to be ready..."
@@ -50,18 +62,24 @@ sys.exit(1)
 
 # Determine if we're in the right directory
 if [ -f main.py ]; then
+    echo "Found main.py in current directory"
     SCRIPT_DIR="."
 elif [ -f /app/main.py ]; then
+    echo "Found main.py in /app directory"
     SCRIPT_DIR="/app"
+elif [ -f /tmp/google_ads_scripts/main.py ]; then
+    echo "Found main.py in fallback directory"
+    SCRIPT_DIR="/tmp/google_ads_scripts"
 else
-    echo "Error: Cannot find main.py in any expected location"
-    echo "Current directory: $(pwd)"
-    echo "Listing files in current directory:"
-    ls -la
-    echo "Listing files in /app directory:"
-    ls -la /app || echo "Cannot access /app directory"
+    echo "ERROR: Cannot find main.py in any expected location"
+    echo "Checking PATH environment:"
+    echo $PATH
+    echo "Trying to execute Python directly:"
+    python --version
     exit 1
 fi
+
+echo "Using scripts from: ${SCRIPT_DIR}"
 
 # Determine the command to run
 case "$1" in
@@ -75,6 +93,7 @@ case "$1" in
         ;;
     etl)
         echo "Running full ETL process..."
+        echo "Command: python ${SCRIPT_DIR}/main.py --days-back ${2:-7}"
         python ${SCRIPT_DIR}/main.py --days-back "${2:-7}"
         ;;
     schedule)
