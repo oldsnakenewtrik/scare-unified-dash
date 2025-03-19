@@ -174,6 +174,14 @@ function CampaignMapping() {
     }));
   };
 
+  // Helper function to handle source system input - allow custom values
+  const handleSourceSystemChange = (event, newValue) => {
+    setCurrentMapping(prev => ({
+      ...prev,
+      source_system: newValue
+    }));
+  };
+
   // Save mapping to database
   const handleSaveMapping = async () => {
     try {
@@ -373,11 +381,20 @@ function CampaignMapping() {
         <DialogTitle>Map Campaign Name</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-            <TextField
-              label="Source System"
-              value={currentMapping.source_system}
-              disabled
-              fullWidth
+            <Autocomplete
+              freeSolo
+              options={DATA_SOURCES}
+              value={currentMapping.source_system || ''}
+              onChange={handleSourceSystemChange}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Source System"
+                  name="source_system"
+                  variant="outlined"
+                  fullWidth
+                />
+              )}
             />
             
             <TextField

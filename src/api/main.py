@@ -94,6 +94,31 @@ class CampaignSource(BaseModel):
     original_campaign_name: str
     network: Optional[str] = None
 
+class CampaignOrderUpdate(BaseModel):
+    id: int
+    display_order: int
+
+class MetricsSummaryHierarchical(BaseModel):
+    impressions: Optional[int] = None
+    clicks: Optional[int] = None
+    conversions: Optional[float] = None
+    cost: Optional[float] = None
+
+class CampaignHierarchical(BaseModel):
+    id: int
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    pretty_campaign_name: str
+    campaign_category: Optional[str] = None
+    campaign_type: Optional[str] = None
+    network: Optional[str] = None
+    display_order: int
+    impressions: Optional[int] = None
+    clicks: Optional[int] = None
+    conversions: Optional[float] = None
+    cost: Optional[float] = None
+
 # Health check endpoint
 @app.get("/health")
 def health_check():
@@ -477,6 +502,7 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                 SET pretty_campaign_name = :pretty_campaign_name,
                     campaign_category = :campaign_category,
                     campaign_type = :campaign_type,
+                    network = :network,
                     is_active = TRUE,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
@@ -489,6 +515,7 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     "pretty_campaign_name": mapping.pretty_campaign_name,
                     "campaign_category": mapping.campaign_category,
                     "campaign_type": mapping.campaign_type,
+                    "network": mapping.network,
                     "id": existing.id
                 }
             ).fetchone()
@@ -497,9 +524,9 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
             # Insert if it doesn't exist
             query = """
                 INSERT INTO public.sm_campaign_name_mapping
-                (source_system, external_campaign_id, original_campaign_name, pretty_campaign_name, campaign_category, campaign_type)
+                (source_system, external_campaign_id, original_campaign_name, pretty_campaign_name, campaign_category, campaign_type, network)
                 VALUES
-                (:source_system, :external_campaign_id, :original_campaign_name, :pretty_campaign_name, :campaign_category, :campaign_type)
+                (:source_system, :external_campaign_id, :original_campaign_name, :pretty_campaign_name, :campaign_category, :campaign_type, :network)
                 RETURNING *
             """
             
@@ -511,7 +538,8 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     "original_campaign_name": mapping.original_campaign_name,
                     "pretty_campaign_name": mapping.pretty_campaign_name,
                     "campaign_category": mapping.campaign_category,
-                    "campaign_type": mapping.campaign_type
+                    "campaign_type": mapping.campaign_type,
+                    "network": mapping.network
                 }
             ).fetchone()
         
@@ -541,6 +569,61 @@ def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical])
+def get_hierarchical_campaigns(db=Depends(get_db)):
+    """Get all campaign data in a hierarchical structure with metrics"""
+    query = """
+        SELECT 
+            m.id,
+            m.source_system,
+            m.external_campaign_id,
+            m.original_campaign_name,
+            m.pretty_campaign_name,
+            m.campaign_category,
+            m.campaign_type,
+            m.network,
+            COALESCE(m.display_order, 0) as display_order,
+            0 as impressions,
+            0 as clicks,
+            0 as conversions,
+            0 as cost
+        FROM 
+            sm_campaign_name_mapping m
+        WHERE 
+            m.is_active = TRUE
+        ORDER BY 
+            m.source_system, 
+            m.network, 
+            m.display_order,
+            m.pretty_campaign_name
+    """
+    
+    result = db.execute(text(query)).fetchall()
+    return [dict(row) for row in result]
+
+@app.post("/api/campaign-order")
+def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
+    """Update the display order of campaigns"""
+    
+    for order in orders:
+        query = """
+            UPDATE sm_campaign_name_mapping
+            SET display_order = :display_order,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        """
+        
+        db.execute(
+            text(query),
+            {
+                "id": order.id,
+                "display_order": order.display_order
+            }
+        )
+    
+    db.commit()
+    return {"success": True, "message": "Campaign orders updated successfully"}
 
 if __name__ == "__main__":
     import uvicorn

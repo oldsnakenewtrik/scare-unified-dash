@@ -173,10 +173,11 @@ CREATE TABLE public.sm_campaign_name_mapping (
     campaign_category VARCHAR(100),
     campaign_type VARCHAR(100),
     network VARCHAR(50),
+    display_order INT DEFAULT 0,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(source_system, external_campaign_id)
+    UNIQUE(id)  -- Only enforce uniqueness on the primary key
 );
 
 -- Create indexes for better performance on mapping lookups

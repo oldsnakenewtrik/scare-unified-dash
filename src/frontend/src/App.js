@@ -33,10 +33,11 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { format, subDays, subMonths, parse } from 'date-fns';
 import SettingsIcon from '@mui/icons-material/Settings';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 // Import components
 import CampaignMapping from './components/CampaignMapping';
+import HierarchicalDashboard from './components/HierarchicalDashboard';
 
 // Create a theme
 const theme = createTheme({
@@ -328,6 +329,9 @@ function App() {
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
               SCARE Unified Metrics Dashboard
             </Typography>
+            <Button color="inherit" component={Link} to="/" onClick={() => handleNavigate('dashboard')}>Dashboard</Button>
+            <Button color="inherit" component={Link} to="/hierarchy" onClick={() => handleNavigate('hierarchy')}>Hierarchical View</Button>
+            <Button color="inherit" component={Link} to="/mapping" onClick={() => handleNavigate('campaign-mapping')}>Campaign Mapping</Button>
             <IconButton
               color="inherit"
               onClick={handleOpenSettings}
@@ -486,6 +490,8 @@ function App() {
             </>
           ) : currentView === 'campaign-mapping' ? (
             <CampaignMapping />
+          ) : currentView === 'hierarchy' ? (
+            <HierarchicalDashboard />
           ) : currentView === 'settings/campaign-mapping?refresh=true' ? (
             <Button 
               variant="contained" 
