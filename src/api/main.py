@@ -24,7 +24,7 @@ app = FastAPI(title="SCARE Unified Metrics API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://front-production-f6e6.up.railway.app", "*"],  # Allow your frontend domain and all origins during development
+    allow_origins=["*"],  # Allow all origins during development
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
@@ -118,6 +118,12 @@ class CampaignHierarchical(BaseModel):
     clicks: Optional[int] = None
     conversions: Optional[float] = None
     cost: Optional[float] = None
+
+class UnmappedCampaign(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    campaign_name: str
+    network: Optional[str] = None
 
 # Health check endpoint
 @app.get("/health")
@@ -423,60 +429,94 @@ def get_campaign_mappings(source_system: Optional[str] = None, db=Depends(get_db
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/unmapped-campaigns", response_model=List[CampaignSource])
+@app.get("/api/unmapped-campaigns", response_model=List[UnmappedCampaign])
 def get_unmapped_campaigns(db=Depends(get_db)):
-    """
-    Get unique campaign sources that aren't yet mapped to pretty names
-    """
+    """Get a list of unmapped campaigns from various sources"""
     try:
-        query = """
-        WITH all_campaigns AS (
-            -- Google Ads campaigns
-            SELECT 'Google Ads' as source_system, campaign_id::VARCHAR as external_campaign_id, 
-                   campaign_name as original_campaign_name, network
-            FROM public.sm_fact_google_ads
-            GROUP BY source_system, campaign_id, campaign_name, network
-            
-            UNION
-            
-            -- Bing Ads campaigns
-            SELECT 'Bing Ads' as source_system, campaign_id::VARCHAR as external_campaign_id, 
-                   campaign_name as original_campaign_name, network
-            FROM public.sm_fact_bing_ads
-            GROUP BY source_system, campaign_id, campaign_name, network
-            
-            UNION
-            
-            -- RedTrack campaigns - no default network
-            SELECT 'RedTrack' as source_system, campaign_id::VARCHAR as external_campaign_id, 
-                   campaign_name as original_campaign_name, NULL as network
-            FROM public.sm_fact_redtrack
-            GROUP BY source_system, campaign_id, campaign_name
-            
-            UNION
-            
-            -- Matomo campaigns - no default network
-            SELECT 'Matomo' as source_system, campaign_id::VARCHAR as external_campaign_id, 
-                   campaign_name as original_campaign_name, NULL as network
-            FROM public.sm_fact_matomo
-            WHERE campaign_id IS NOT NULL AND campaign_name IS NOT NULL
-            GROUP BY source_system, campaign_id, campaign_name
-        )
-        
-        SELECT ac.* FROM all_campaigns ac
-        LEFT JOIN public.sm_campaign_name_mapping m 
-            ON ac.source_system = m.source_system 
-            AND ac.external_campaign_id = m.external_campaign_id
-        WHERE m.id IS NULL
-        ORDER BY ac.source_system, ac.original_campaign_name;
+        # Get Google Ads campaigns
+        google_query = """
+            SELECT DISTINCT 
+                'Google Ads' as source_system,
+                g.campaign_id as external_campaign_id,
+                g.campaign_name as campaign_name,
+                'Search' as network -- Default for Google Ads, can be changed by user
+            FROM 
+                sm_fact_google_ads g
+            LEFT JOIN 
+                sm_campaign_name_mapping m ON 
+                CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id AND 
+                m.source_system = 'Google Ads'
+            WHERE 
+                m.id IS NULL
         """
         
-        result = db.execute(text(query))
-        unmapped = [dict(row) for row in result]
+        # Get Bing Ads campaigns
+        bing_query = """
+            SELECT DISTINCT 
+                'Bing Ads' as source_system,
+                b.campaign_id as external_campaign_id,
+                b.campaign_name as campaign_name,
+                'Search' as network -- Default for Bing Ads, can be changed by user
+            FROM 
+                sm_fact_bing_ads b
+            LEFT JOIN 
+                sm_campaign_name_mapping m ON 
+                CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id AND 
+                m.source_system = 'Bing Ads'
+            WHERE 
+                m.id IS NULL
+        """
         
-        return unmapped
+        # Get RedTrack campaigns
+        redtrack_query = """
+            SELECT DISTINCT 
+                'RedTrack' as source_system,
+                r.campaign_id as external_campaign_id,
+                r.campaign_name as campaign_name,
+                NULL as network -- No default for RedTrack, must be specified
+            FROM 
+                sm_fact_redtrack r
+            LEFT JOIN 
+                sm_campaign_name_mapping m ON 
+                CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id AND 
+                m.source_system = 'RedTrack'
+            WHERE 
+                m.id IS NULL
+        """
+        
+        # Get Matomo campaigns
+        matomo_query = """
+            SELECT DISTINCT 
+                'Matomo' as source_system,
+                mt.campaign_id as external_campaign_id,
+                mt.campaign_name as campaign_name,
+                NULL as network -- No default for Matomo, must be specified
+            FROM 
+                sm_fact_matomo mt
+            LEFT JOIN 
+                sm_campaign_name_mapping m ON 
+                CAST(mt.campaign_id AS VARCHAR) = m.external_campaign_id AND 
+                m.source_system = 'Matomo'
+            WHERE 
+                m.id IS NULL
+        """
+        
+        # Union all results
+        union_query = f"""
+            {google_query}
+            UNION ALL
+            {bing_query}
+            UNION ALL
+            {redtrack_query}
+            UNION ALL
+            {matomo_query}
+            ORDER BY source_system, campaign_name
+        """
+        
+        result = db.execute(text(union_query)).fetchall()
+        return [dict(row) for row in result]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch unmapped campaigns: {str(e)}")
 
 @app.post("/api/campaign-mappings", response_model=CampaignMapping)
 def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
@@ -573,57 +613,100 @@ def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
 @app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical])
 def get_hierarchical_campaigns(db=Depends(get_db)):
     """Get all campaign data in a hierarchical structure with metrics"""
-    query = """
-        SELECT 
-            m.id,
-            m.source_system,
-            m.external_campaign_id,
-            m.original_campaign_name,
-            m.pretty_campaign_name,
-            m.campaign_category,
-            m.campaign_type,
-            m.network,
-            COALESCE(m.display_order, 0) as display_order,
-            0 as impressions,
-            0 as clicks,
-            0 as conversions,
-            0 as cost
-        FROM 
-            sm_campaign_name_mapping m
-        WHERE 
-            m.is_active = TRUE
-        ORDER BY 
-            m.source_system, 
-            m.network, 
-            m.display_order,
-            m.pretty_campaign_name
-    """
-    
-    result = db.execute(text(query)).fetchall()
-    return [dict(row) for row in result]
+    try:
+        # First check if display_order column exists
+        check_column_query = """
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'sm_campaign_name_mapping' 
+        AND column_name = 'display_order'
+        """
+        
+        has_display_order = db.execute(text(check_column_query)).fetchone() is not None
+        
+        # Adjust query based on whether display_order exists
+        if has_display_order:
+            order_by_clause = "m.source_system, m.network, m.display_order, m.pretty_campaign_name"
+            display_order_col = "m.display_order as display_order,"
+        else:
+            order_by_clause = "m.source_system, m.network, m.pretty_campaign_name"
+            display_order_col = "0 as display_order,"
+        
+        query = f"""
+            SELECT 
+                m.id,
+                m.source_system,
+                m.external_campaign_id,
+                m.original_campaign_name,
+                m.pretty_campaign_name,
+                m.campaign_category,
+                m.campaign_type,
+                m.network,
+                {display_order_col}
+                0 as impressions,
+                0 as clicks,
+                0 as conversions,
+                0 as cost
+            FROM 
+                sm_campaign_name_mapping m
+            WHERE 
+                m.is_active = TRUE
+            ORDER BY 
+                {order_by_clause}
+        """
+        
+        result = db.execute(text(query)).fetchall()
+        return [dict(row) for row in result]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/campaign-order")
 def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
     """Update the display order of campaigns"""
-    
-    for order in orders:
-        query = """
-            UPDATE sm_campaign_name_mapping
-            SET display_order = :display_order,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id
+    try:
+        # First check if display_order column exists
+        check_column_query = """
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'sm_campaign_name_mapping' 
+        AND column_name = 'display_order'
         """
         
-        db.execute(
-            text(query),
-            {
-                "id": order.id,
-                "display_order": order.display_order
-            }
-        )
-    
-    db.commit()
-    return {"success": True, "message": "Campaign orders updated successfully"}
+        has_display_order = db.execute(text(check_column_query)).fetchone() is not None
+        
+        # If display_order doesn't exist, create it
+        if not has_display_order:
+            add_column_query = """
+            ALTER TABLE public.sm_campaign_name_mapping
+            ADD COLUMN display_order INT DEFAULT 0
+            """
+            db.execute(text(add_column_query))
+            db.commit()
+        
+        # Update the display_order for each campaign
+        for order in orders:
+            query = """
+                UPDATE sm_campaign_name_mapping
+                SET display_order = :display_order,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            """
+            
+            db.execute(
+                text(query),
+                {
+                    "id": order.id,
+                    "display_order": order.display_order
+                }
+            )
+        
+        db.commit()
+        return {"success": True, "message": "Campaign orders updated successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
