@@ -11,15 +11,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger('google_ads_yaml_test')
 
-# Get the directory of the current script
-script_dir = os.path.dirname(os.path.abspath(__file__))
+# List of potential file paths to try
+yaml_paths = [
+    # Local development path
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+    # Railway paths
+    "/app/src/data_ingestion/google_ads/google-ads.yaml",
+    "/app/google-ads.yaml",
+    # Railway repository root path
+    os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+]
 
-# Path to the YAML file
-yaml_path = os.path.join(script_dir, 'google-ads.yaml')
-logger.info(f"Looking for YAML file at: {yaml_path}")
+# Try each path until we find the YAML file
+yaml_path = None
+for path in yaml_paths:
+    logger.info(f"Checking for YAML file at: {path}")
+    if os.path.exists(path):
+        yaml_path = path
+        logger.info(f"Found YAML file at: {path}")
+        break
 
-if not os.path.exists(yaml_path):
-    logger.error(f"YAML file not found at {yaml_path}")
+if not yaml_path:
+    logger.error(f"YAML file not found at any of the checked paths")
     sys.exit(1)
 
 try:
