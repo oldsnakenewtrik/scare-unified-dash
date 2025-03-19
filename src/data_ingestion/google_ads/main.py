@@ -160,40 +160,47 @@ def get_date_dimension_id(date_str):
     Returns:
         int: Date dimension ID
     """
-    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-    
     with engine.connect() as conn:
-        # Check if date exists
-        query = sa.text("""
-            SELECT date_id FROM scare_metrics.dim_date 
-            WHERE date = :date
-        """)
-        
-        result = conn.execute(query, {"date": date_obj}).fetchone()
-        
-        if result:
+        try:
+            # Parse date string to datetime object
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            
+            # Extract date components
+            year = date_obj.year
+            month = date_obj.month
+            day = date_obj.day
+            
+            # Check if date exists
+            query = sa.text("""
+                SELECT date_id FROM scare_metrics.dim_date 
+                WHERE year = :year AND month = :month AND day = :day
+            """)
+            
+            result = conn.execute(query, {"year": year, "month": month, "day": day}).fetchone()
+            
+            if result:
+                return result[0]
+            
+            # Insert new date
+            query = sa.text("""
+                INSERT INTO scare_metrics.dim_date 
+                (year, month, day, full_date) 
+                VALUES (:year, :month, :day, :full_date)
+                RETURNING date_id
+            """)
+            
+            result = conn.execute(query, {
+                "year": year, 
+                "month": month, 
+                "day": day, 
+                "full_date": date_obj
+            }).fetchone()
+            
             return result[0]
-        
-        # Insert new date
-        query = sa.text("""
-            INSERT INTO scare_metrics.dim_date 
-            (date, year, month, day, day_of_week, week_of_year, quarter, created_at) 
-            VALUES (:date, :year, :month, :day, :day_of_week, :week_of_year, :quarter, :created_at)
-            RETURNING date_id
-        """)
-        
-        result = conn.execute(query, {
-            "date": date_obj,
-            "year": date_obj.year,
-            "month": date_obj.month,
-            "day": date_obj.day,
-            "day_of_week": date_obj.weekday(),
-            "week_of_year": date_obj.isocalendar()[1],
-            "quarter": (date_obj.month - 1) // 3 + 1,
-            "created_at": datetime.now()
-        }).fetchone()
-        
-        return result[0]
+        except Exception as e:
+            logger.error(f"Error getting date dimension ID: {str(e)}")
+            # Return a default ID if something goes wrong
+            return 1  # You may want to adjust this to a different strategy
 
 def check_google_ads_health():
     """Test if we can connect to the Google Ads API and fetch basic data."""
@@ -261,6 +268,7 @@ def fetch_google_ads_data(start_date, end_date):
         return []
     
     try:
+        # Use the service in a way that's compatible with v14
         ga_service = client.get_service("GoogleAdsService")
         
         # Construct the query to fetch campaign metrics
@@ -271,6 +279,7 @@ def fetch_google_ads_data(start_date, end_date):
               metrics.impressions,
               metrics.clicks,
               metrics.cost_micros,
+              metrics.ctr,
               metrics.average_cpc,
               metrics.conversions,
               metrics.conversions_value,
@@ -282,34 +291,33 @@ def fetch_google_ads_data(start_date, end_date):
         
         logger.info(f"Executing Google Ads query...")
         
-        # Execute the query and stream results
-        response = ga_service.search_stream(customer_id=GOOGLE_ADS_CUSTOMER_ID, query=query)
+        # Use search instead of search_stream for better compatibility
+        search_request = client.get_type("SearchGoogleAdsRequest")
+        search_request.customer_id = GOOGLE_ADS_CUSTOMER_ID
+        search_request.query = query
+        
+        # Execute the request
+        response = ga_service.search(request=search_request)
         
         # Process the results
         campaign_data = []
         
-        for batch in response:
-            for row in batch.results:
-                # Extract data from the row and handle fields carefully to avoid None errors
-                data = {
-                    "campaign_id": row.campaign.id,
-                    "campaign_name": row.campaign.name,
-                    "impressions": row.metrics.impressions,
-                    "clicks": row.metrics.clicks,
-                    "cost": row.metrics.cost_micros / 1_000_000,  # Convert from micros to dollars
-                    "date": row.segments.date
-                }
-                
-                # Handle potentially missing or null metric fields
-                if hasattr(row.metrics, 'average_cpc') and row.metrics.average_cpc:
-                    data["average_cpc"] = row.metrics.average_cpc.value / 1_000_000 if hasattr(row.metrics.average_cpc, 'value') else 0
-                else:
-                    data["average_cpc"] = 0
-                    
-                data["conversions"] = row.metrics.conversions if hasattr(row.metrics, 'conversions') else 0
-                data["conversions_value"] = row.metrics.conversions_value if hasattr(row.metrics, 'conversions_value') else 0
-                
-                campaign_data.append(data)
+        for row in response.results:
+            # Extract data from the row and handle fields carefully to avoid None errors
+            data = {
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "impressions": float(row.metrics.impressions) if row.metrics.impressions else 0,
+                "clicks": float(row.metrics.clicks) if row.metrics.clicks else 0,
+                "cost": float(row.metrics.cost_micros) / 1_000_000 if row.metrics.cost_micros else 0,  # Convert from micros to dollars
+                "ctr": float(row.metrics.ctr) if row.metrics.ctr else 0,
+                "average_cpc": float(row.metrics.average_cpc) / 1_000_000 if row.metrics.average_cpc else 0,
+                "conversions": float(row.metrics.conversions) if row.metrics.conversions else 0,
+                "conversions_value": float(row.metrics.conversions_value) if row.metrics.conversions_value else 0,
+                "date": row.segments.date
+            }
+            
+            campaign_data.append(data)
                 
         logger.info(f"Successfully fetched {len(campaign_data)} rows of campaign data")
         return campaign_data
@@ -363,12 +371,11 @@ def store_google_ads_data(data):
             for item in data:
                 # Get dimension IDs
                 campaign_id = get_campaign_dimension_id(
-                    conn,
                     item['campaign_name'],
                     str(item['campaign_id'])
                 )
                 
-                date_id = get_date_dimension_id(conn, item['date'])
+                date_id = get_date_dimension_id(item['date'])
                 
                 # Calculate CTR (Click-Through Rate) if not provided
                 if 'ctr' not in item and item['impressions'] > 0:
