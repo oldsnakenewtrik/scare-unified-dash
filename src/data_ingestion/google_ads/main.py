@@ -10,6 +10,8 @@ from token_refresh import get_access_token, refresh_token
 import schedule
 import time
 import json
+import yaml
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(
@@ -43,24 +45,52 @@ engine = sa.create_engine(DATABASE_URL)
 def get_google_ads_client():
     """Create and return a Google Ads API client."""
     try:
-        # Check if we need to refresh the token first
-        if not get_access_token():
-            refresh_token()
-        
-        # Load credentials from dictionary - more reliable approach
-        credentials = {
-            "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
-            "client_id": GOOGLE_ADS_CLIENT_ID,
-            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
-            "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
-            "use_proto_plus": True,
-            "version": "v14"
-        }
-        
-        # Create the client
-        client = GoogleAdsClient.load_from_dict(credentials)
-        logger.info("Successfully created Google Ads client")
-        return client
+        # List of potential YAML file paths to try
+        yaml_paths = [
+            # Local development path
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            # Railway paths
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            # Railway repository root path
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+
+        # Try to load from YAML first (preferred method)
+        yaml_path = None
+        for path in yaml_paths:
+            if os.path.exists(path):
+                yaml_path = path
+                logger.info(f"Found google-ads.yaml at: {path}")
+                break
+    
+        if yaml_path:
+            # Load from YAML file
+            logger.info("Creating Google Ads client from YAML file")
+            client = GoogleAdsClient.load_from_storage(yaml_path)
+            logger.info("Successfully created Google Ads client from YAML")
+            return client
+        else:
+            # Fallback to environment variables
+            logger.info("YAML file not found, loading from environment variables")
+            # Check if we need to refresh the token first
+            if not get_access_token():
+                refresh_token()
+            
+            # Load credentials from dictionary - more reliable approach
+            credentials = {
+                "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
+                "client_id": GOOGLE_ADS_CLIENT_ID,
+                "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+                "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
+                "use_proto_plus": True,
+                "version": "v18"
+            }
+            
+            # Create the client
+            client = GoogleAdsClient.load_from_dict(credentials)
+            logger.info("Successfully created Google Ads client from environment variables")
+            return client
     except Exception as e:
         logger.error(f"Error creating Google Ads client: {str(e)}")
         return None
@@ -225,13 +255,17 @@ def check_google_ads_health():
                 LIMIT 1
             """
             
-            response = ga_service.search_stream(customer_id=GOOGLE_ADS_CUSTOMER_ID, query=query)
+            # Use search instead of search_stream for compatibility
+            response = ga_service.search(customer_id=GOOGLE_ADS_CUSTOMER_ID, query=query)
             
             # Process the response
-            for batch in response:
-                for row in batch.results:
-                    logger.info(f"✅ Successfully connected to Google Ads account: {row.customer.descriptive_name} (ID: {row.customer.id})")
-                    return True
+            result_count = 0
+            for row in response:
+                result_count += 1
+                logger.info(f"✅ Successfully connected to Google Ads account: {row.customer.descriptive_name} (ID: {row.customer.id})")
+            
+            if result_count > 0:
+                return True
             
             logger.info("✅ Connected to API but no account information found.")
             return True
