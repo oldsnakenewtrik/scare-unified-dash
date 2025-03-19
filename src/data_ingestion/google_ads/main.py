@@ -1,233 +1,273 @@
 import os
+import sys
+import logging
+import argparse
+import pandas as pd
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import sqlalchemy as sa
+from token_refresh import get_access_token, refresh_token
+import schedule
 import time
 import json
-import logging
-import datetime
-import schedule
-import pandas as pd
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
-from token_refresh import get_access_token, refresh_token, schedule_token_refresh
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
 )
-logger = logging.getLogger("google_ads_connector")
+logger = logging.getLogger('google_ads_connector')
 
 # Load environment variables
 load_dotenv()
 
-# Configuration
-GOOGLE_ADS_DEVELOPER_TOKEN = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
-GOOGLE_ADS_CLIENT_ID = os.getenv("GOOGLE_ADS_CLIENT_ID")
-GOOGLE_ADS_CLIENT_SECRET = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
-GOOGLE_ADS_REFRESH_TOKEN = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
-GOOGLE_ADS_CUSTOMER_ID = os.getenv("GOOGLE_ADS_CUSTOMER_ID")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
+try:
+    from google.ads.googleads.client import GoogleAdsClient
+    from google.ads.googleads.errors import GoogleAdsException
+except ImportError:
+    logger.error("Failed to import Google Ads API libraries. Make sure they are installed.")
+    sys.exit(1)
+
+# Google Ads API credentials
+GOOGLE_ADS_DEVELOPER_TOKEN = os.getenv('GOOGLE_ADS_DEVELOPER_TOKEN')
+GOOGLE_ADS_CLIENT_ID = os.getenv('GOOGLE_ADS_CLIENT_ID')
+GOOGLE_ADS_CLIENT_SECRET = os.getenv('GOOGLE_ADS_CLIENT_SECRET')
+GOOGLE_ADS_REFRESH_TOKEN = os.getenv('GOOGLE_ADS_REFRESH_TOKEN')
+GOOGLE_ADS_CUSTOMER_ID = os.getenv('GOOGLE_ADS_CUSTOMER_ID')
+DATABASE_URL = os.getenv('DATABASE_URL', "postgresql://scare_user:scare_password@localhost:5432/scare_metrics")
 DATA_FETCH_INTERVAL_HOURS = int(os.getenv("DATA_FETCH_INTERVAL_HOURS", "12"))
 
 # Initialize database connection
-engine = create_engine(DATABASE_URL)
+engine = sa.create_engine(DATABASE_URL)
 
 def get_google_ads_client():
     """Create and return a Google Ads API client."""
     try:
         # Check if we need to refresh the token first
         if not get_access_token():
-            logger.error("Failed to get a valid access token")
-            return None
-            
-        # Now load the client from environment variables
-        # The token refresher ensures the oauth2 credentials are current
-        client = GoogleAdsClient.load_from_env()
+            refresh_token()
+        
+        # Load credentials from dictionary - more reliable approach
+        credentials = {
+            "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
+            "client_id": GOOGLE_ADS_CLIENT_ID,
+            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+            "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
+            "use_proto_plus": True,
+            "version": "v14"
+        }
+        
+        # Create the client
+        client = GoogleAdsClient.load_from_dict(credentials)
+        logger.info("Successfully created Google Ads client")
         return client
     except Exception as e:
-        logger.error(f"Failed to create Google Ads client: {e}")
+        logger.error(f"Error creating Google Ads client: {str(e)}")
         return None
-
-def get_date_dimension_id(date):
-    """Get the date dimension ID for a given date, creating the date entry if it doesn't exist."""
-    with engine.connect() as conn:
-        # Check if date exists
-        result = conn.execute(
-            text("SELECT date_id FROM scare_metrics.dim_date WHERE full_date = :date"),
-            {"date": date}
-        ).fetchone()
-        
-        if result:
-            return result[0]
-        
-        # If date doesn't exist, create it
-        date_obj = datetime.datetime.strptime(date, "%Y-%m-%d")
-        
-        conn.execute(
-            text("""
-                INSERT INTO scare_metrics.dim_date 
-                (full_date, day_of_week, day_name, month, month_name, quarter, year, is_weekend)
-                VALUES (:full_date, :day_of_week, :day_name, :month, :month_name, :quarter, :year, :is_weekend)
-            """),
-            {
-                "full_date": date,
-                "day_of_week": date_obj.weekday(),
-                "day_name": date_obj.strftime("%A"),
-                "month": date_obj.month,
-                "month_name": date_obj.strftime("%B"),
-                "quarter": (date_obj.month - 1) // 3 + 1,
-                "year": date_obj.year,
-                "is_weekend": date_obj.weekday() >= 5
-            }
-        )
-        
-        # Get the newly created ID
-        result = conn.execute(
-            text("SELECT date_id FROM scare_metrics.dim_date WHERE full_date = :date"),
-            {"date": date}
-        ).fetchone()
-        
-        if result:
-            return result[0]
-        else:
-            raise Exception(f"Failed to create date dimension record for {date}")
 
 def get_campaign_dimension_id(campaign_name, source_campaign_id=None):
-    """Get the campaign dimension ID for a given campaign, creating the campaign entry if it doesn't exist."""
+    """
+    Get or create a campaign dimension ID.
+    
+    Args:
+        campaign_name (str): Name of the campaign
+        source_campaign_id (str, optional): Original campaign ID from the source system
+        
+    Returns:
+        int: Campaign dimension ID
+    """
     with engine.connect() as conn:
         # Check if campaign exists
-        query = """
-            SELECT campaign_id 
-            FROM scare_metrics.dim_campaign 
-            WHERE campaign_name = :campaign_name 
-            AND source_system = 'Google Ads'
-        """
+        query = sa.text("""
+            SELECT campaign_id FROM scare_metrics.dim_campaign 
+            WHERE campaign_name = :name OR source_campaign_id = :source_id
+        """)
         
-        if source_campaign_id:
-            query += " AND source_campaign_id = :source_campaign_id"
-            params = {"campaign_name": campaign_name, "source_campaign_id": source_campaign_id}
-        else:
-            params = {"campaign_name": campaign_name}
-        
-        result = conn.execute(text(query), params).fetchone()
+        result = conn.execute(query, {"name": campaign_name, "source_id": source_campaign_id}).fetchone()
         
         if result:
             return result[0]
         
-        # If campaign doesn't exist, create it
-        today = datetime.date.today().isoformat()
+        # Insert new campaign
+        query = sa.text("""
+            INSERT INTO scare_metrics.dim_campaign 
+            (campaign_name, source_campaign_id, source_system, created_at) 
+            VALUES (:name, :source_id, 'Google Ads', :created_at)
+            RETURNING campaign_id
+        """)
         
-        conn.execute(
-            text("""
-                INSERT INTO scare_metrics.dim_campaign 
-                (campaign_name, source_system, source_campaign_id, created_date, updated_date, is_active)
-                VALUES (:campaign_name, 'Google Ads', :source_campaign_id, :created_date, :updated_date, TRUE)
-            """),
-            {
-                "campaign_name": campaign_name,
-                "source_campaign_id": source_campaign_id,
-                "created_date": today,
-                "updated_date": today
-            }
-        )
+        result = conn.execute(query, {
+            "name": campaign_name, 
+            "source_id": source_campaign_id, 
+            "created_at": datetime.now()
+        }).fetchone()
         
-        # Get the newly created ID
-        result = conn.execute(
-            text("""
-                SELECT campaign_id 
-                FROM scare_metrics.dim_campaign 
-                WHERE campaign_name = :campaign_name 
-                AND source_system = 'Google Ads'
-            """),
-            {"campaign_name": campaign_name}
-        ).fetchone()
-        
-        if result:
-            return result[0]
-        else:
-            raise Exception(f"Failed to create campaign dimension record for {campaign_name}")
+        return result[0]
 
-def get_ad_group_dimension_id(campaign_id, ad_group_name, source_ad_group_id=None):
-    """Get the ad group dimension ID for a given ad group, creating the ad group entry if it doesn't exist."""
+def get_ad_group_dimension_id(ad_group_name, campaign_id, source_ad_group_id=None):
+    """
+    Get or create an ad group dimension ID.
+    
+    Args:
+        ad_group_name (str): Name of the ad group
+        campaign_id (int): Campaign dimension ID
+        source_ad_group_id (str, optional): Original ad group ID from the source system
+        
+    Returns:
+        int: Ad group dimension ID
+    """
     with engine.connect() as conn:
         # Check if ad group exists
-        query = """
-            SELECT ad_group_id 
-            FROM scare_metrics.dim_ad_group 
-            WHERE ad_group_name = :ad_group_name 
+        query = sa.text("""
+            SELECT ad_group_id FROM scare_metrics.dim_ad_group 
+            WHERE (ad_group_name = :name OR source_ad_group_id = :source_id)
             AND campaign_id = :campaign_id
-            AND source_system = 'Google Ads'
-        """
+        """)
         
-        if source_ad_group_id:
-            query += " AND source_ad_group_id = :source_ad_group_id"
-            params = {
-                "ad_group_name": ad_group_name, 
-                "campaign_id": campaign_id, 
-                "source_ad_group_id": source_ad_group_id
-            }
-        else:
-            params = {"ad_group_name": ad_group_name, "campaign_id": campaign_id}
-        
-        result = conn.execute(text(query), params).fetchone()
+        result = conn.execute(query, {
+            "name": ad_group_name, 
+            "source_id": source_ad_group_id,
+            "campaign_id": campaign_id
+        }).fetchone()
         
         if result:
             return result[0]
         
-        # If ad group doesn't exist, create it
-        today = datetime.date.today().isoformat()
+        # Insert new ad group
+        query = sa.text("""
+            INSERT INTO scare_metrics.dim_ad_group 
+            (ad_group_name, campaign_id, source_ad_group_id, source_system, created_at) 
+            VALUES (:name, :campaign_id, :source_id, 'Google Ads', :created_at)
+            RETURNING ad_group_id
+        """)
         
-        conn.execute(
-            text("""
-                INSERT INTO scare_metrics.dim_ad_group 
-                (campaign_id, ad_group_name, source_system, source_ad_group_id, created_date, updated_date, is_active)
-                VALUES (:campaign_id, :ad_group_name, 'Google Ads', :source_ad_group_id, :created_date, :updated_date, TRUE)
-            """),
-            {
-                "campaign_id": campaign_id,
-                "ad_group_name": ad_group_name,
-                "source_ad_group_id": source_ad_group_id,
-                "created_date": today,
-                "updated_date": today
-            }
-        )
+        result = conn.execute(query, {
+            "name": ad_group_name, 
+            "campaign_id": campaign_id,
+            "source_id": source_ad_group_id, 
+            "created_at": datetime.now()
+        }).fetchone()
         
-        # Get the newly created ID
-        result = conn.execute(
-            text("""
-                SELECT ad_group_id 
-                FROM scare_metrics.dim_ad_group 
-                WHERE ad_group_name = :ad_group_name 
-                AND campaign_id = :campaign_id
-                AND source_system = 'Google Ads'
-            """),
-            {"ad_group_name": ad_group_name, "campaign_id": campaign_id}
-        ).fetchone()
-        
-        if result:
-            return result[0]
-        else:
-            raise Exception(f"Failed to create ad group dimension record for {ad_group_name}")
+        return result[0]
 
-def fetch_google_ads_data(client, customer_id, start_date, end_date):
-    """Fetch data from Google Ads API for the specified date range."""
-    logger.info(f"Fetching Google Ads data for customer {customer_id} from {start_date} to {end_date}")
+def get_date_dimension_id(date_str):
+    """
+    Get or create a date dimension ID.
     
-    if not client:
-        logger.error("Google Ads client is not initialized")
-        return None
+    Args:
+        date_str (str): Date string in YYYY-MM-DD format
         
+    Returns:
+        int: Date dimension ID
+    """
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+    
+    with engine.connect() as conn:
+        # Check if date exists
+        query = sa.text("""
+            SELECT date_id FROM scare_metrics.dim_date 
+            WHERE date = :date
+        """)
+        
+        result = conn.execute(query, {"date": date_obj}).fetchone()
+        
+        if result:
+            return result[0]
+        
+        # Insert new date
+        query = sa.text("""
+            INSERT INTO scare_metrics.dim_date 
+            (date, year, month, day, day_of_week, week_of_year, quarter, created_at) 
+            VALUES (:date, :year, :month, :day, :day_of_week, :week_of_year, :quarter, :created_at)
+            RETURNING date_id
+        """)
+        
+        result = conn.execute(query, {
+            "date": date_obj,
+            "year": date_obj.year,
+            "month": date_obj.month,
+            "day": date_obj.day,
+            "day_of_week": date_obj.weekday(),
+            "week_of_year": date_obj.isocalendar()[1],
+            "quarter": (date_obj.month - 1) // 3 + 1,
+            "created_at": datetime.now()
+        }).fetchone()
+        
+        return result[0]
+
+def check_google_ads_health():
+    """Test if we can connect to the Google Ads API and fetch basic data."""
+    logger.info("Testing Google Ads API connection...")
+    
+    try:
+        # Try to create a client
+        client = get_google_ads_client()
+        if not client:
+            logger.error("❌ Failed to create Google Ads client")
+            return False
+        
+        logger.info("✅ Successfully created Google Ads client")
+        
+        # Test basic API query
+        try:
+            # Simple query to fetch account information
+            ga_service = client.get_service("GoogleAdsService")
+            query = """
+                SELECT customer.id, customer.descriptive_name
+                FROM customer
+                LIMIT 1
+            """
+            
+            response = ga_service.search_stream(customer_id=GOOGLE_ADS_CUSTOMER_ID, query=query)
+            
+            # Process the response
+            for batch in response:
+                for row in batch.results:
+                    logger.info(f"✅ Successfully connected to Google Ads account: {row.customer.descriptive_name} (ID: {row.customer.id})")
+                    return True
+            
+            logger.info("✅ Connected to API but no account information found.")
+            return True
+            
+        except GoogleAdsException as ex:
+            logger.error(f"❌ Google Ads API error: {ex.error.code().name}")
+            for error in ex.failure.errors:
+                logger.error(f"  - Error message: {error.message}")
+                if error.location:
+                    for field_path_element in error.location.field_path_elements:
+                        logger.error(f"    - On field: {field_path_element.field_name}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to Google Ads API: {str(e)}")
+        return False
+
+def fetch_google_ads_data(start_date, end_date):
+    """
+    Fetch data from Google Ads API for the specified date range.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Fetching Google Ads data from {start_date} to {end_date}...")
+    
+    client = get_google_ads_client()
+    if not client:
+        logger.error("Failed to create Google Ads client. Aborting data fetch.")
+        return []
+    
     try:
         ga_service = client.get_service("GoogleAdsService")
         
+        # Construct the query to fetch campaign metrics
         query = f"""
             SELECT
               campaign.id,
               campaign.name,
-              ad_group.id,
-              ad_group.name,
               metrics.impressions,
               metrics.clicks,
               metrics.cost_micros,
@@ -240,43 +280,51 @@ def fetch_google_ads_data(client, customer_id, start_date, end_date):
             ORDER BY segments.date
         """
         
-        stream = ga_service.search_stream(customer_id=customer_id, query=query)
+        logger.info(f"Executing Google Ads query...")
         
-        results = []
-        for batch in stream:
+        # Execute the query and stream results
+        response = ga_service.search_stream(customer_id=GOOGLE_ADS_CUSTOMER_ID, query=query)
+        
+        # Process the results
+        campaign_data = []
+        
+        for batch in response:
             for row in batch.results:
-                results.append({
+                # Extract data from the row and handle fields carefully to avoid None errors
+                data = {
                     "campaign_id": row.campaign.id,
                     "campaign_name": row.campaign.name,
-                    "ad_group_id": row.ad_group.id,
-                    "ad_group_name": row.ad_group.name,
-                    "date": row.segments.date,
                     "impressions": row.metrics.impressions,
                     "clicks": row.metrics.clicks,
-                    "cost": row.metrics.cost_micros / 1000000,  # Convert micros to standard currency
-                    "average_cpc": row.metrics.average_cpc / 1000000,  # Convert micros to standard currency
-                    "conversions": row.metrics.conversions,
-                    "conversion_value": row.metrics.conversions_value,
-                    "ctr": row.metrics.ctr if hasattr(row.metrics, 'ctr') else None,
-                    "conversion_rate": row.metrics.conversion_rate if hasattr(row.metrics, 'conversion_rate') else None,
-                    "cost_per_conversion": row.metrics.cost_per_conversion / 1000000 if hasattr(row.metrics, 'cost_per_conversion') else None,
-                    "average_position": row.metrics.average_position if hasattr(row.metrics, 'average_position') else None
-                })
+                    "cost": row.metrics.cost_micros / 1_000_000,  # Convert from micros to dollars
+                    "date": row.segments.date
+                }
+                
+                # Handle potentially missing or null metric fields
+                if hasattr(row.metrics, 'average_cpc') and row.metrics.average_cpc:
+                    data["average_cpc"] = row.metrics.average_cpc.value / 1_000_000 if hasattr(row.metrics.average_cpc, 'value') else 0
+                else:
+                    data["average_cpc"] = 0
+                    
+                data["conversions"] = row.metrics.conversions if hasattr(row.metrics, 'conversions') else 0
+                data["conversions_value"] = row.metrics.conversions_value if hasattr(row.metrics, 'conversions_value') else 0
+                
+                campaign_data.append(data)
+                
+        logger.info(f"Successfully fetched {len(campaign_data)} rows of campaign data")
+        return campaign_data
         
-        return results
-    
     except GoogleAdsException as ex:
-        logger.error(f"Request with ID '{ex.request_id}' failed with status '{ex.error.code().name}'")
+        logger.error(f"Google Ads API error: {ex.error.code().name}")
         for error in ex.failure.errors:
-            logger.error(f"\tError with message '{error.message}'.")
+            logger.error(f"  - Error message: {error.message}")
             if error.location:
                 for field_path_element in error.location.field_path_elements:
-                    logger.error(f"\t\tOn field: {field_path_element.field_name}")
-        return None
-    
+                    logger.error(f"    - On field: {field_path_element.field_name}")
+        return []
     except Exception as e:
-        logger.error(f"Error fetching data from Google Ads API: {str(e)}")
-        return None
+        logger.error(f"Error fetching Google Ads data: {str(e)}")
+        return []
 
 def process_google_ads_data(data):
     """Process and transform Google Ads API data."""
@@ -288,214 +336,266 @@ def process_google_ads_data(data):
     df = pd.DataFrame(data)
     return df
 
-def store_google_ads_data(df):
-    """Store processed Google Ads data in the database."""
-    if df.empty:
-        logger.warning("No Google Ads data to store")
+def store_google_ads_data(data):
+    """
+    Store the processed Google Ads data in the database.
+    
+    Args:
+        data (List[Dict]): List of processed campaign data dictionaries
+        
+    Returns:
+        int: Number of records inserted/updated
+    """
+    if not data:
+        logger.warning("No data to store in database")
         return 0
-    
-    rows_inserted = 0
-    
+        
     try:
-        with engine.connect() as conn:
-            for _, row in df.iterrows():
+        logger.info(f"Storing {len(data)} records in database")
+        
+        # Initialize connection
+        engine = sa.create_engine(DATABASE_URL)
+        
+        records_affected = 0
+        
+        with engine.begin() as conn:
+            # Process each record
+            for item in data:
                 # Get dimension IDs
-                date_id = get_date_dimension_id(row["date"])
                 campaign_id = get_campaign_dimension_id(
-                    row["campaign_name"], 
-                    source_campaign_id=str(row["campaign_id"])
+                    conn,
+                    item['campaign_name'],
+                    str(item['campaign_id'])
                 )
-                ad_group_id = get_ad_group_dimension_id(
-                    campaign_id,
-                    row["ad_group_name"],
-                    source_ad_group_id=str(row["ad_group_id"])
-                )
+                
+                date_id = get_date_dimension_id(conn, item['date'])
+                
+                # Calculate CTR (Click-Through Rate) if not provided
+                if 'ctr' not in item and item['impressions'] > 0:
+                    ctr = (item['clicks'] / item['impressions']) * 100
+                else:
+                    ctr = item.get('ctr', 0)
+                
+                # Get average CPC from the item or calculate it
+                if 'average_cpc' not in item and item['clicks'] > 0:
+                    avg_cpc = item['cost'] / item['clicks']
+                else:
+                    avg_cpc = item.get('average_cpc', 0)
                 
                 # Check if record already exists
-                existing = conn.execute(
-                    text("""
-                        SELECT google_ads_id 
-                        FROM scare_metrics.fact_google_ads 
-                        WHERE date_id = :date_id AND campaign_id = :campaign_id AND ad_group_id = :ad_group_id
-                    """),
-                    {"date_id": date_id, "campaign_id": campaign_id, "ad_group_id": ad_group_id}
-                ).fetchone()
+                check_query = sa.text("""
+                    SELECT id
+                    FROM scare_metrics.fact_google_ads
+                    WHERE campaign_id = :campaign_id
+                    AND date_id = :date_id
+                """)
                 
-                # Prepare data to insert/update
-                fact_data = {
-                    "date_id": date_id,
-                    "campaign_id": campaign_id,
-                    "ad_group_id": ad_group_id,
-                    "impressions": int(row.get("impressions", 0)),
-                    "clicks": int(row.get("clicks", 0)),
-                    "cost": float(row.get("cost", 0)),
-                    "average_cpc": float(row.get("average_cpc", 0)),
-                    "conversions": float(row.get("conversions", 0)),
-                    "conversion_value": float(row.get("conversion_value", 0)),
-                    "ctr": float(row.get("ctr", 0)) if row.get("ctr") else None,
-                    "conversion_rate": float(row.get("conversion_rate", 0)) if row.get("conversion_rate") else None,
-                    "cost_per_conversion": float(row.get("cost_per_conversion", 0)) if row.get("cost_per_conversion") else None,
-                    "average_position": float(row.get("average_position", 0)) if row.get("average_position") else None,
-                    "source_data": json.dumps(row.to_dict()),
-                    "updated_at": datetime.datetime.now()
-                }
+                existing = conn.execute(
+                    check_query,
+                    {"campaign_id": campaign_id, "date_id": date_id}
+                ).fetchone()
                 
                 if existing:
                     # Update existing record
-                    update_query = text("""
+                    update_query = sa.text("""
                         UPDATE scare_metrics.fact_google_ads
                         SET 
                             impressions = :impressions,
                             clicks = :clicks,
                             cost = :cost,
                             average_cpc = :average_cpc,
-                            conversions = :conversions,
-                            conversion_value = :conversion_value,
                             ctr = :ctr,
-                            conversion_rate = :conversion_rate,
-                            cost_per_conversion = :cost_per_conversion,
-                            average_position = :average_position,
-                            source_data = :source_data,
-                            updated_at = :updated_at
-                        WHERE date_id = :date_id AND campaign_id = :campaign_id AND ad_group_id = :ad_group_id
+                            conversions = :conversions,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE campaign_id = :campaign_id
+                        AND date_id = :date_id
                     """)
-                    conn.execute(update_query, fact_data)
+                    
+                    conn.execute(
+                        update_query,
+                        {
+                            "campaign_id": campaign_id,
+                            "date_id": date_id,
+                            "impressions": item['impressions'],
+                            "clicks": item['clicks'],
+                            "cost": item['cost'],
+                            "average_cpc": avg_cpc,
+                            "ctr": ctr,
+                            "conversions": item.get('conversions', 0)
+                        }
+                    )
                 else:
                     # Insert new record
-                    insert_query = text("""
-                        INSERT INTO scare_metrics.fact_google_ads
-                        (date_id, campaign_id, ad_group_id, impressions, clicks, cost, average_cpc, conversions, conversion_value, 
-                        ctr, conversion_rate, cost_per_conversion, average_position, source_data, created_at, updated_at)
-                        VALUES
-                        (:date_id, :campaign_id, :ad_group_id, :impressions, :clicks, :cost, :average_cpc, :conversions, :conversion_value,
-                        :ctr, :conversion_rate, :cost_per_conversion, :average_position, :source_data, :updated_at, :updated_at)
+                    insert_query = sa.text("""
+                        INSERT INTO scare_metrics.fact_google_ads (
+                            campaign_id,
+                            date_id,
+                            impressions,
+                            clicks,
+                            cost,
+                            average_cpc,
+                            ctr,
+                            conversions,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            :campaign_id,
+                            :date_id,
+                            :impressions,
+                            :clicks,
+                            :cost,
+                            :average_cpc,
+                            :ctr,
+                            :conversions,
+                            CURRENT_TIMESTAMP,
+                            CURRENT_TIMESTAMP
+                        )
                     """)
-                    conn.execute(insert_query, fact_data)
-                    rows_inserted += 1
+                    
+                    conn.execute(
+                        insert_query,
+                        {
+                            "campaign_id": campaign_id,
+                            "date_id": date_id,
+                            "impressions": item['impressions'],
+                            "clicks": item['clicks'],
+                            "cost": item['cost'],
+                            "average_cpc": avg_cpc,
+                            "ctr": ctr,
+                            "conversions": item.get('conversions', 0)
+                        }
+                    )
+                
+                records_affected += 1
             
-            conn.commit()
+        logger.info(f"Successfully stored {records_affected} records in database")
+        return records_affected
         
-        logger.info(f"Successfully stored {rows_inserted} new Google Ads records in the database")
-        return rows_inserted
-    
     except Exception as e:
         logger.error(f"Error storing Google Ads data: {str(e)}")
-        return 0
+        raise
 
 def run_google_ads_etl(days_back=3):
     """
-    Run the complete ETL process for Google Ads data.
+    Run the full ETL process for Google Ads data.
     
     Args:
-        days_back (int): Number of days to look back for data. Default is 3.
+        days_back (int): Number of days to go back for data fetching
+        
+    Returns:
+        bool: True if successful, False otherwise
     """
-    logger.info(f"Starting Google Ads ETL process for the last {days_back} days")
-    
     try:
-        # Initialize Google Ads client
-        client = get_google_ads_client()
-        if not client:
-            return
+        logger.info(f"Starting Google Ads ETL process, fetching data for the last {days_back} days")
         
-        if not GOOGLE_ADS_CUSTOMER_ID:
-            logger.error("Google Ads customer ID is not configured")
-            return
+        # Get date range
+        end_date = datetime.today()
+        start_date = end_date - timedelta(days=days_back)
         
-        # Calculate date range
-        end_date = datetime.date.today()
-        start_date = end_date - datetime.timedelta(days=days_back)
-        
-        # Format dates as strings
+        # Format dates
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
         
-        # Fetch, process, and store data
-        raw_data = fetch_google_ads_data(client, GOOGLE_ADS_CUSTOMER_ID, start_date_str, end_date_str)
-        processed_data = process_google_ads_data(raw_data)
-        records_inserted = store_google_ads_data(processed_data)
+        # Fetch data
+        data = fetch_google_ads_data(start_date_str, end_date_str)
         
-        logger.info(f"Google Ads ETL process completed successfully. {records_inserted} new records inserted.")
-    
+        if not data:
+            logger.warning("No data fetched from Google Ads API")
+            return False
+        
+        # Save to JSON for backup
+        output_file = f"google_ads_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(output_file, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+        logger.info(f"Raw data saved to {output_file}")
+        
+        try:
+            # Process and store data
+            processed_data = process_google_ads_data(data)
+            records_affected = store_google_ads_data(processed_data)
+            
+            logger.info(f"ETL process completed successfully. {records_affected} records affected.")
+            return True
+        except Exception as db_error:
+            logger.error(f"Database operation failed: {str(db_error)}. Data saved to {output_file} for later import.")
+            return False
+        
     except Exception as e:
-        logger.error(f"Error in Google Ads ETL process: {str(e)}")
+        logger.error(f"Error running Google Ads ETL process: {str(e)}")
+        return False
 
 def backfill_google_ads_data(start_date_str, end_date_str=None):
     """
-    Backfill Google Ads data for a specific date range.
+    Backfill Google Ads data for a specified date range.
     
     Args:
         start_date_str (str): Start date in YYYY-MM-DD format
         end_date_str (str, optional): End date in YYYY-MM-DD format. Defaults to yesterday.
     """
     if end_date_str is None:
-        end_date = datetime.date.today() - datetime.timedelta(days=1)
+        end_date = datetime.today() - timedelta(days=1)
         end_date_str = end_date.strftime("%Y-%m-%d")
     
     logger.info(f"Starting Google Ads backfill from {start_date_str} to {end_date_str}")
     
-    try:
-        # Initialize Google Ads client
-        client = get_google_ads_client()
-        if not client:
-            logger.error("Failed to create Google Ads client for backfill")
-            return
+    # Check if we can connect to the API
+    client = get_google_ads_client()
+    if not client:
+        logger.error("Failed to create Google Ads client. Aborting backfill process.")
+        return
         
-        if not GOOGLE_ADS_CUSTOMER_ID:
-            logger.error("Google Ads customer ID is not configured for backfill")
-            return
-        
-        # Fetch, process, and store data
-        raw_data = fetch_google_ads_data(client, GOOGLE_ADS_CUSTOMER_ID, start_date_str, end_date_str)
-        processed_data = process_google_ads_data(raw_data)
-        records_inserted = store_google_ads_data(processed_data)
-        
-        logger.info(f"Google Ads backfill completed successfully. {records_inserted} new records inserted.")
+    # Fetch, process, and store data
+    raw_data = fetch_google_ads_data(start_date_str, end_date_str)
+    records_inserted = store_google_ads_data(raw_data)
     
-    except Exception as e:
-        logger.error(f"Error in Google Ads backfill process: {str(e)}")
+    logger.info(f"Google Ads backfill complete: {records_inserted} records processed from {start_date_str} to {end_date_str}")
 
-def schedule_jobs():
-    """Schedule the ETL job to run at regular intervals."""
-    # Run immediately at startup
-    run_google_ads_etl()
+def setup_scheduled_tasks():
+    """Set up scheduled tasks for Google Ads data fetching."""
+    # Schedule the ETL process to run daily
+    schedule.every().day.at("03:00").do(run_google_ads_etl, days_back=3)
     
-    # Schedule to run every X hours
-    schedule.every(DATA_FETCH_INTERVAL_HOURS).hours.do(lambda: run_google_ads_etl(1))  # Get just the latest day in regular runs
+    logger.info("Scheduled Google Ads ETL tasks set up")
     
-    # Weekly health check
-    schedule.every().monday.at("01:00").do(lambda: logger.info("Google Ads API health check: OK"))
-    
-    logger.info(f"Scheduled Google Ads ETL to run every {DATA_FETCH_INTERVAL_HOURS} hours")
+    # Run the scheduler in a loop
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # Check every minute
 
 def main():
-    """Main function to run the Google Ads connector with command line arguments."""
-    import argparse
-    parser = argparse.ArgumentParser(description="Google Ads data connector")
-    parser.add_argument("--backfill", action="store_true", help="Run in backfill mode")
+    """Main entry point for the Google Ads connector."""
+    logger.info("Starting Google Ads connector service")
+    
+    parser = argparse.ArgumentParser(description="Google Ads Connector Service")
+    parser.add_argument("--check-health", action="store_true", help="Check Google Ads API connection")
+    parser.add_argument("--backfill", action="store_true", help="Backfill Google Ads data")
     parser.add_argument("--start-date", help="Start date for backfill (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date for backfill (YYYY-MM-DD)")
+    parser.add_argument("--days-back", type=int, default=3, help="Days back to fetch data for regular ETL")
+    parser.add_argument("--schedule", action="store_true", help="Run scheduled ETL tasks")
+    
     args = parser.parse_args()
     
-    # Always ensure token is refreshed when starting
-    refresh_token()
-    
+    if args.check_health:
+        logger.info("Running health check for Google Ads API connection")
+        check_google_ads_health()
+        return
+            
     if args.backfill:
         if not args.start_date:
-            logger.error("Start date required for backfill")
+            logger.error("Start date is required for backfill")
             return
+            
         backfill_google_ads_data(args.start_date, args.end_date)
-    else:
-        # Set up regular schedule and run indefinitely
-        schedule_jobs()
-        logger.info("Starting scheduled jobs...")
+        return
         
-        # Add a token refresh schedule - every 50 minutes
-        schedule.every(50).minutes.do(refresh_token)
+    if args.schedule:
+        logger.info("Starting scheduled ETL tasks")
+        setup_scheduled_tasks()
+        return
         
-        while True:
-            schedule.run_pending()
-            time.sleep(60)  # Check schedule every minute
+    # Default behavior: run ETL once
+    run_google_ads_etl(days_back=args.days_back)
 
 if __name__ == "__main__":
-    logger.info("Starting Google Ads connector service")
     main()
