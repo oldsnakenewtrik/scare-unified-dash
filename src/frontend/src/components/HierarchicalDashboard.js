@@ -51,7 +51,18 @@ function HierarchicalDashboard() {
       setCampaignData(organizedData);
     } catch (err) {
       console.error('Error fetching campaign data:', err);
-      setError('Failed to fetch campaign data. Please try again later.');
+      setError('Failed to fetch campaign data. This could be due to database migration issues. Try refreshing or contact support if the problem persists.');
+      
+      // If we failed to get hierarchical data, try to fall back to regular campaign mappings
+      try {
+        // This is a temporary fallback to show something while migrations are being applied
+        const mappingsResponse = await axios.get(`${API_BASE_URL}/api/campaign-mappings`);
+        const fallbackData = organizeFallbackData(mappingsResponse.data);
+        setCampaignData(fallbackData);
+        setError('Using limited functionality mode while database updates are being applied.');
+      } catch (fallbackErr) {
+        console.error('Fallback data fetch failed:', fallbackErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -89,6 +100,54 @@ function HierarchicalDashboard() {
         network.campaigns.sort((a, b) => a.display_order - b.display_order);
         return network;
       });
+      
+      // Sort networks alphabetically
+      source.networks.sort((a, b) => a.name.localeCompare(b.name));
+      return source;
+    });
+    
+    // Sort sources alphabetically
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    
+    return result;
+  };
+
+  // Function to organize fallback data when hierarchical endpoint fails
+  const organizeFallbackData = (data) => {
+    // Group by source system
+    const sourceGroups = {};
+    
+    data.forEach(item => {
+      const source = item.source_system || 'Uncategorized';
+      const network = item.network || 'Uncategorized';
+      
+      if (!sourceGroups[source]) {
+        sourceGroups[source] = {
+          name: source,
+          networks: {}
+        };
+      }
+      
+      if (!sourceGroups[source].networks[network]) {
+        sourceGroups[source].networks[network] = {
+          name: network,
+          campaigns: []
+        };
+      }
+      
+      sourceGroups[source].networks[network].campaigns.push({
+        ...item,
+        display_order: 0, // Default display order
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        cost: 0
+      });
+    });
+    
+    // Convert to array
+    const result = Object.values(sourceGroups).map(source => {
+      source.networks = Object.values(source.networks);
       
       // Sort networks alphabetically
       source.networks.sort((a, b) => a.name.localeCompare(b.name));

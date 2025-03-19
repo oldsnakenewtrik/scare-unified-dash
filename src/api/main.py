@@ -19,6 +19,14 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Run database migrations on startup
+try:
+    from run_db_migrations import run_migrations
+    run_migrations(engine)
+except Exception as e:
+    print(f"Warning: Failed to run database migrations: {str(e)}")
+    print("Application will continue to start, but some features may not work correctly")
+
 app = FastAPI(title="SCARE Unified Metrics API")
 
 # Configure CORS
