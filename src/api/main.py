@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -902,22 +902,22 @@ def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db))
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/admin/clear_google_ads_mappings")
 def admin_clear_google_ads_mappings(db=Depends(get_db)):
     """Clear all Google Ads campaign mappings"""
+    from admin_commands import clear_google_ads_mappings
     logger.info("Admin endpoint: clear_google_ads_mappings called")
     success = clear_google_ads_mappings(db)
     return {"success": success}
 
 @app.post("/api/admin/import_real_google_ads_data")
-def admin_import_real_google_ads_data(data: dict = Body(None), db=Depends(get_db)):
+def admin_import_real_google_ads_data(data: dict = Body(...), db=Depends(get_db)):
     """Import real Google Ads data"""
+    from admin_commands import import_real_google_ads_data
     logger.info("Admin endpoint: import_real_google_ads_data called")
     success = import_real_google_ads_data(db, data)
     return {"success": success}
+
 if __name__ == "__main__":
     import uvicorn
-
-from admin_commands import clear_google_ads_mappings, import_real_google_ads_data
     uvicorn.run(app, host="0.0.0.0", port=5000)
