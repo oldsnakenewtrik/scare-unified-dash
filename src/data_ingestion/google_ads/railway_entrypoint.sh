@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # Enable logging to file for debugging cron issues
-LOGFILE="/tmp/google_ads_cron.log"
+LOGFILE="/var/log/google_ads/cron.log"
+mkdir -p /var/log/google_ads
 exec > >(tee -a ${LOGFILE})
 exec 2>&1
 
-echo "========== RAILWAY ENTRYPOINT SCRIPT =========="
+echo "========== RAILWAY ENTRYPOINT SCRIPT START =========="
+echo "============ $(date) ============"
+
+# Print all environment variables (without the sensitive ones)
+env | grep -v PASSWORD | grep -v SECRET | grep -v TOKEN | sort
+
 echo "Started at: $(date)"
 echo "Args: $@"
 echo "Command: $0"
@@ -15,6 +21,14 @@ echo "Listing files in current directory:"
 ls -la
 echo "Listing files in app directory:"
 ls -la /app || echo "Cannot access /app directory"
+
+# Check Python installation and packages
+echo "Python version:"
+python --version
+echo "Pip version:"
+pip --version
+echo "Installed packages:"
+pip list
 
 # Create a fallback directory where we'll copy everything
 mkdir -p /tmp/google_ads_scripts
@@ -90,35 +104,61 @@ fi
 
 echo "Using scripts from: ${SCRIPT_DIR}"
 
-# SPECIAL HANDLING FOR CRON
-echo "Environment variables:"
-env | grep -v PASSWORD | grep -v SECRET | grep -v TOKEN
+# Create a secondary log file specifically for the ETL process
+ETL_LOGFILE="/var/log/google_ads/etl_process.log"
+touch ${ETL_LOGFILE}
+echo "$(date) - Starting ETL process" >> ${ETL_LOGFILE}
 
 # Determine the command to run
+echo "========== COMMAND EXECUTION START =========="
+set -x  # Enable debugging
 case "$1" in
     fetch)
-        echo "Running fetch-only mode..."
-        python ${SCRIPT_DIR}/fetch_only.py
+        echo "Running fetch-only mode..." | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/fetch_only.py 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     import)
-        echo "Running import mode..."
-        python ${SCRIPT_DIR}/import_from_json.py "${2:-google_ads_data.json}"
+        echo "Running import mode..." | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/import_from_json.py "${2:-google_ads_data.json}" 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     etl)
-        echo "Running full ETL process..."
-        echo "Command: python ${SCRIPT_DIR}/main.py --days-back ${2:-7}"
-        python ${SCRIPT_DIR}/main.py --days-back "${2:-7}"
+        echo "Running full ETL process..." | tee -a ${ETL_LOGFILE}
+        echo "Command: python ${SCRIPT_DIR}/main.py --days-back ${2:-7}" | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/main.py --days-back "${2:-7}" 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     schedule)
-        echo "Running scheduled ETL process via cron..."
-        python ${SCRIPT_DIR}/main.py --schedule
+        echo "Running scheduled ETL process via cron..." | tee -a ${ETL_LOGFILE}
+        echo "Command: python ${SCRIPT_DIR}/main.py --schedule" | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/main.py --schedule 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     *)
-        echo "No specific command provided, defaulting to ETL process..."
-        echo "Command: python ${SCRIPT_DIR}/main.py --days-back 7"
-        python ${SCRIPT_DIR}/main.py --days-back 7
+        echo "No specific command provided, defaulting to ETL process..." | tee -a ${ETL_LOGFILE}
+        echo "Command: python ${SCRIPT_DIR}/main.py --days-back 7" | tee -a ${ETL_LOGFILE}
+        echo "============ EXECUTING MAIN.PY ============" | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/main.py --days-back 7 2>&1 | tee -a ${ETL_LOGFILE}
+        echo "============ MAIN.PY EXECUTION COMPLETE ============" | tee -a ${ETL_LOGFILE}
         ;;
 esac
+RESULT=$?
+set +x  # Disable debugging
+
+if [ $RESULT -ne 0 ]; then
+    echo "========== ERROR: Command failed with exit code $RESULT ==========" | tee -a ${ETL_LOGFILE}
+    echo "Python path:" | tee -a ${ETL_LOGFILE}
+    python -c "import sys; print(sys.path)" | tee -a ${ETL_LOGFILE}
+    echo "Trying to import pandas directly:" | tee -a ${ETL_LOGFILE}
+    python -c "import pandas; print(f'Pandas version: {pandas.__version__}')" | tee -a ${ETL_LOGFILE} || echo "Failed to import pandas" | tee -a ${ETL_LOGFILE}
+    echo "Trying to import other libraries:" | tee -a ${ETL_LOGFILE}
+    python -c "import sqlalchemy; print(f'SQLAlchemy version: {sqlalchemy.__version__}')" | tee -a ${ETL_LOGFILE} || echo "Failed to import sqlalchemy" | tee -a ${ETL_LOGFILE}
+    python -c "import google; print(f'Google version: {google.__version__}')" | tee -a ${ETL_LOGFILE} || echo "Failed to import google" | tee -a ${ETL_LOGFILE}
+else
+    echo "========== Command completed successfully with exit code $RESULT ==========" | tee -a ${ETL_LOGFILE}
+fi
+
+# Make a copy of the ETL log to a persistent location
+echo "ETL Log contents:"
+cat ${ETL_LOGFILE}
 
 echo "Script completed at: $(date)"
-echo "Check log file at: ${LOGFILE}"
+echo "Check log files at: ${LOGFILE} and ${ETL_LOGFILE}"
+echo "========== RAILWAY ENTRYPOINT SCRIPT END =========="
