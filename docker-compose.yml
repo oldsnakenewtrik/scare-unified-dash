@@ -127,6 +127,25 @@ services:
     networks:
       - scare_network
 
+  # Matomo
+  matomo:
+    build:
+      context: ./src/data_ingestion/matomo
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://scare_user:scare_password@postgres:5432/scare_metrics
+      MATOMO_API_URL: ${MATOMO_API_URL}
+      MATOMO_SITE_ID: ${MATOMO_SITE_ID}
+      MATOMO_AUTH_TOKEN: ${MATOMO_AUTH_TOKEN}
+      DATA_FETCH_INTERVAL_HOURS: 12
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - scare_network
+    volumes:
+      - ./src/data_ingestion/matomo:/app
+
 networks:
   scare_network:
     driver: bridge

@@ -5,9 +5,15 @@ import sys
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 
+# Set up logging to file
+log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google_ads_test.log')
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger('google_ads_yaml_test')
 
@@ -59,11 +65,17 @@ try:
     with open(yaml_path, 'r') as file:
         config = yaml.safe_load(file)
     
-    customer_id = config.get('linked_customer_id') or config.get('login_customer_id')
-    logger.info(f"Using customer ID from YAML: {customer_id}")
+    # Look for both customer_id and linked_customer_id in the YAML
+    # Ensure it's treated as a string
+    customer_id = str(config.get('customer_id') or config.get('linked_customer_id') or config.get('login_customer_id'))
+    logger.info(f"Using customer ID from YAML: {customer_id} (type: {type(customer_id)})")
     
     # Execute the query
     logger.info(f"Executing query: {query}")
+    
+    # Explicitly print the arguments being passed
+    logger.info(f"Calling service.search with customer_id={customer_id} (type: {type(customer_id)})")
+    
     response = service.search(customer_id=customer_id, query=query)
     
     # Process the results
@@ -83,3 +95,6 @@ except GoogleAdsException as ex:
                 logger.error(f"\t\tOn field: {field_path_element.field_name}")
 except Exception as e:
     logger.error(f"An unexpected error occurred: {str(e)}")
+    # Print the full stack trace for more detailed debugging
+    import traceback
+    logger.error(traceback.format_exc())

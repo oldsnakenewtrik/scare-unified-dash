@@ -1,0 +1,38 @@
+2025-03-19 13:16:42,357 - google_ads_yaml_test - INFO - Checking for YAML file at: C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\data_ingestion\google_ads\google-ads.yaml
+2025-03-19 13:16:42,358 - google_ads_yaml_test - INFO - Found YAML file at: C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\data_ingestion\google_ads\google-ads.yaml
+2025-03-19 13:16:42,359 - google_ads_yaml_test - INFO - Loading client configuration from YAML file
+2025-03-19 13:16:42,755 - google_ads_yaml_test - INFO - Client created successfully from YAML!
+2025-03-19 13:16:43,371 - google_ads_yaml_test - INFO - Using customer ID from YAML: 6506752943
+2025-03-19 13:16:43,372 - google_ads_yaml_test - INFO - Executing query: 
+        SELECT 
+            campaign.id, 
+            campaign.name 
+        FROM campaign 
+        LIMIT 10
+    
+2025-03-19 13:16:43,373 - google_ads_yaml_test - ERROR - An unexpected error occurred: bad argument type for built-in operation
+2025-03-19 13:17:37,753 - google_ads_yaml_test - INFO - Checking for YAML file at: C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\data_ingestion\google_ads\google-ads.yaml
+2025-03-19 13:17:37,754 - google_ads_yaml_test - INFO - Found YAML file at: C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\data_ingestion\google_ads\google-ads.yaml
+2025-03-19 13:17:37,754 - google_ads_yaml_test - INFO - Loading client configuration from YAML file
+2025-03-19 13:17:38,094 - google_ads_yaml_test - INFO - Client created successfully from YAML!
+2025-03-19 13:17:38,664 - google_ads_yaml_test - INFO - Using customer ID from YAML: 6506752943 (type: <class 'str'>)
+2025-03-19 13:17:38,665 - google_ads_yaml_test - INFO - Executing query: 
+        SELECT 
+            campaign.id, 
+            campaign.name 
+        FROM campaign 
+        LIMIT 10
+    
+2025-03-19 13:17:38,666 - google_ads_yaml_test - INFO - Calling service.search with customer_id=6506752943 (type: <class 'str'>)
+2025-03-19 13:17:38,965 - google.ads.googleads.client - INFO - Request made: ClientCustomerId: 6506752943, Host: googleads.googleapis.com, Method: /google.ads.googleads.v18.services.GoogleAdsService/Search, RequestId: DcsJbxUXZfeZNfDF9ADUOg, IsFault: False, FaultMessage: None
+2025-03-19 13:17:38,966 - google_ads_yaml_test - INFO - Campaign ID: 1551002366, Name: ON Search - Main
+2025-03-19 13:17:38,967 - google_ads_yaml_test - INFO - Campaign ID: 1578512790, Name: ON Search - Rental
+2025-03-19 13:17:38,967 - google_ads_yaml_test - INFO - Campaign ID: 1582691225, Name: CA Search - Adjustable Beds Only
+2025-03-19 13:17:38,967 - google_ads_yaml_test - INFO - Campaign ID: 1598762763, Name: CA Search - Rental Beds Only
+2025-03-19 13:17:38,968 - google_ads_yaml_test - INFO - Campaign ID: 1625787246, Name: NY Search - Hospital Beds
+2025-03-19 13:17:38,968 - google_ads_yaml_test - INFO - Campaign ID: 1625787252, Name: NY Search - Main
+2025-03-19 13:17:38,968 - google_ads_yaml_test - INFO - Campaign ID: 1686627109, Name: BC Search - Main
+2025-03-19 13:17:38,969 - google_ads_yaml_test - INFO - Campaign ID: 1686627112, Name: BC Search - Hospital Beds
+2025-03-19 13:17:38,969 - google_ads_yaml_test - INFO - Campaign ID: 1735035991, Name: US Main - Max Conversions  Experiment
+2025-03-19 13:17:38,969 - google_ads_yaml_test - INFO - Campaign ID: 1848503881, Name: LA Search - Hospital Beds
+2025-03-19 13:17:38,969 - google_ads_yaml_test - INFO - Search completed successfully! Found 10 campaigns.

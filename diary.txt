@@ -1,0 +1,94 @@
+# SCARE Unified Dashboard Development Diary
+
+## Project Overview
+The SCARE Unified Dashboard aims to create a single, comprehensive view of marketing performance across multiple platforms. It integrates data from Google Ads, Bing Ads, Matomo Analytics, and RedTrack conversions, normalizing campaign identifiers to provide unified metrics and insights.
+
+## Development Timeline
+
+### Phase 1: Initial Setup and Database Schema (COMPLETED)
+- Created a comprehensive database schema with dimension tables (campaigns, dates) and fact tables for each data source
+- Implemented the schema with proper relationships and constraints
+- Set up a unified view that combines metrics from all sources
+- Created sample data for testing without requiring API connections
+- Established the PostgreSQL database on Railway for production use
+
+### Phase 2: Google Ads API Integration (COMPLETED)
+- Successfully connected to Google Ads API using proper YAML configuration
+- Implemented robust fetch_google_ads_data function with proper error handling
+- Created a two-step ETL process for resilience:
+  * fetch_to_json.py to extract data and save to JSON files
+  * import_from_json.py to load data into the database
+- Added extensive logging for better diagnostics
+- Fixed authentication issues with customer IDs and login credentials
+- Verified successful data extraction with real campaign data
+- Implemented proper database connection handling for Railway deployment
+
+### Phase 3: Bing Ads API Integration (IN PROGRESS)
+- Set up authentication for Microsoft Advertising API
+- Created initial client connection code
+- Developing data extraction functions similar to Google Ads
+- Implementing two-step ETL process for consistency
+- Working on mappings between Bing Ads fields and our database schema
+
+### Phase 4: Matomo Analytics Integration (PLANNED)
+- Design ETL process for Matomo Analytics data
+- Create mappings between Matomo data and our database schema
+- Implement two-step ETL process for consistency
+- Develop tests to verify data integrity
+
+### Phase 5: RedTrack Integration (PLANNED)
+- Design ETL process for RedTrack conversion data
+- Create mappings between RedTrack data and our database schema
+- Implement two-step ETL process for consistency
+- Develop tests to verify data integrity
+
+### Phase 6: Campaign Mapping and Normalization (PLANNED)
+- Implement UI for manual campaign mapping across platforms
+- Create a management interface for maintaining mappings
+- Implement automated mapping suggestions based on naming patterns
+- Ensure network field remains un-populated by default (per requirements)
+- Allow for manual network assignment through UI
+- Support custom network names through freeSolo autocomplete
+
+### Phase 7: Dashboard UI Development (PLANNED)
+- Create responsive dashboard layout with Material UI
+- Implement metric cards for key performance indicators
+- Develop interactive charts for trend analysis
+- Create campaign comparison views
+- Implement filters for date ranges, campaigns, and networks
+- Add table views for detailed metric analysis
+- Develop export functionality for reports
+
+### Phase 8: Deployment and DevOps (PLANNED)
+- Set up CI/CD pipeline for automated testing and deployment
+- Configure Docker containers for all components
+- Implement health checks and monitoring
+- Set up scheduled jobs for regular data refresh
+- Develop backup and recovery procedures
+- Create documentation for maintenance and troubleshooting
+
+## Current Status (March 2025)
+We have successfully completed the database schema design and Google Ads integration. We've verified that we can fetch real campaign data from Google Ads API and store it properly in our database. The two-step ETL process provides resilience against connectivity issues, which is particularly important for Railway deployment.
+
+The Google Ads integration now works with proper authentication and handles the API responses correctly. We've implemented proper error handling and extensive logging for better diagnostics.
+
+## Next Steps
+1. Complete the Bing Ads API integration following the same pattern as Google Ads
+2. Implement Matomo Analytics and RedTrack integrations
+3. Develop the campaign mapping UI for cross-platform normalization
+4. Create the dashboard UI for visualizing the unified metrics
+5. Set up the deployment pipeline for production
+
+## Technical Considerations
+- All API integrations should follow the two-step ETL pattern for resilience
+- Campaign mapping should be fully manual with no default values
+- The network field should remain empty until manually mapped
+- The UI should allow custom network names beyond predefined options
+- All components should be containerized for deployment on Railway
+- Database connections should use Railway's PostgreSQL environment variables
+
+## Challenges and Solutions
+- API Authentication: Solved by properly configuring credentials and ensuring proper storage in YAML and environment variables
+- Database Connectivity: Addressed by implementing the two-step ETL process
+- Campaign Normalization: Planned solution with manual mapping UI
+- Data Consistency: Ensured by standardized database schema and ETL processes

@@ -1,0 +1,6 @@
+2025-03-19 15:00:20,639 - add_real_campaigns - INFO - Starting add_real_campaigns script
+2025-03-19 15:00:20,640 - add_real_campaigns - INFO - Deploying admin commands
+2025-03-19 15:00:20,643 - add_real_campaigns - INFO - Backed up C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\api\main.py to C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\api\main.py.bak
+2025-03-19 15:00:20,646 - add_real_campaigns - INFO - Modified C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\api\main.py to include admin endpoints
+2025-03-19 15:00:20,647 - add_real_campaigns - INFO - Created/updated C:\Users\Dave de Vries\Desktop\scare-unified-dash\src\api\admin_commands.py
+2025-03-19 15:00:26,425 - add_real_campaigns - INFO - Changes committed and pushed to git

@@ -49,6 +49,8 @@ The project follows a microservices architecture:
    cp .env.example .env
    ```
    Edit the `.env` file to add your API keys and configurations.
+   
+   For detailed instructions on obtaining API credentials for each service, see the [API Credentials Guide](API_CREDENTIALS_GUIDE.md).
 
 3. Start the application using Docker Compose:
    ```
