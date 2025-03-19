@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY . .
 
 # Copy the entry point script and make it executable
-COPY src/data_ingestion/google_ads/docker_entrypoint.sh /docker_entrypoint.sh
+COPY docker_entrypoint.sh /docker_entrypoint.sh
 RUN chmod +x /docker_entrypoint.sh
 
 ENTRYPOINT ["/docker_entrypoint.sh"]
