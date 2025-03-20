@@ -12,7 +12,8 @@ requests==2.31.0
 # Google API dependencies
 google-auth==2.27.0
 google-auth-oauthlib==0.4.6
-googleapis-common-protos==1.60.0
+googleapis-common-protos==1.56.0
+protobuf==3.19.5  # Added to resolve version conflicts
 
 # Environment and configuration
 python-dotenv==1.0.1
