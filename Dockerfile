@@ -6,8 +6,8 @@ FROM node:16-slim AS frontend-build
 
 WORKDIR /app/frontend
 
-# Configure system for minimal memory usage
-ENV NODE_OPTIONS="--max-old-space-size=1024 --gc-interval=100"
+# Configure system for minimal memory usage - remove invalid gc-interval flag
+ENV NODE_OPTIONS="--max-old-space-size=1024"
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 ENV CI=false
 
@@ -25,15 +25,10 @@ COPY src/frontend/.env.production ./.env.production
 # Build with reduced parallel processes
 RUN npm run build --production
 
-# Build stage for the backend
+# Build stage for the backend - WITHOUT postgresql-client
 FROM python:3.9-slim AS backend-build
 
 WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -48,22 +43,22 @@ COPY . /app
 # Create data directory for JSON files
 RUN mkdir -p /app/data
 
-# Final stage
+# Final stage - install postgresql-client only here
 FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install postgresql-client only in the final image to reduce build memory usage
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy from backend build stage
+# Copy Python packages from build stage
 COPY --from=backend-build /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
 COPY --from=backend-build /usr/local/bin /usr/local/bin
 COPY --from=backend-build /app /app
 
-# Copy built frontend from frontend build stage
+# Copy built frontend
 COPY --from=frontend-build /app/frontend/build /app/src/frontend/build
 
 # Create data directory if it doesn't exist in the final stage
@@ -76,9 +71,11 @@ ENV PORT=5000
 # Expose the port
 EXPOSE 5000
 
-# Set the entrypoint script
+# Copy entrypoint script
 COPY docker_entrypoint.sh /app/docker_entrypoint.sh
+
+# Make entrypoint script executable
 RUN chmod +x /app/docker_entrypoint.sh
 
-# Run the application
+# Set entrypoint
 ENTRYPOINT ["/app/docker_entrypoint.sh"]
