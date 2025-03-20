@@ -50,8 +50,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:8000",
     "https://front-production-f6e6.up.railway.app",
-    "https://scare-unified-dash-production.up.railway.app",
-    "*"
+    "https://scare-unified-dash-production.up.railway.app"
 ]
 
 app.add_middleware(
@@ -859,7 +858,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/campaign-mapping", response_model=CampaignMapping)
+@app.post("/api/campaign-mappings", response_model=CampaignMapping)
 def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
     """
     Create a new campaign mapping
