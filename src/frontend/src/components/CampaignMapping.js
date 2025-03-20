@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -30,6 +30,7 @@ import {
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axios from 'axios';
+import corsProxy from '../utils/corsProxy';
 
 // API base URL (set in .env)
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
@@ -116,12 +117,12 @@ function CampaignMapping() {
       const sourceSystem = getSourceFromTabIndex(activeTab) !== 'All' ? getSourceFromTabIndex(activeTab) : null;
       
       // Fetch all mapped campaigns with optional filter
-      const mappedResponse = await axios.get(`${API_BASE_URL}/api/campaign-mappings`, {
-        params: { source_system: sourceSystem }
-      });
+      const mappedResponse = await corsProxy.get('/api/campaign-mappings', 
+        sourceSystem ? { source_system: sourceSystem } : {}
+      );
       
       // Fetch all unmapped campaigns
-      const unmappedResponse = await axios.get(`${API_BASE_URL}/api/unmapped-campaigns`);
+      const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
       // Filter unmapped campaigns by source if needed
       const allUnmapped = unmappedResponse.data;
@@ -205,7 +206,7 @@ function CampaignMapping() {
   // Save mapping to database
   const handleSaveMapping = async () => {
     try {
-      await axios.post(`${API_BASE_URL}/api/campaign-mappings`, currentMapping);
+      await corsProxy.post('/api/campaign-mappings', currentMapping);
       setDialogOpen(false);
       setSuccess('Campaign mapping saved successfully!');
       fetchData(); // Refresh data
@@ -219,7 +220,7 @@ function CampaignMapping() {
   const handleDeleteMapping = async (mappingId) => {
     if (window.confirm('Are you sure you want to delete this mapping?')) {
       try {
-        await axios.delete(`${API_BASE_URL}/api/campaign-mappings/${mappingId}`);
+        await corsProxy.delete(`/api/campaign-mappings/${mappingId}`);
         setSuccess('Campaign mapping deleted successfully!');
         fetchData(); // Refresh data
       } catch (err) {
@@ -241,7 +242,7 @@ function CampaignMapping() {
     
     try {
       // Fetch all unmapped campaigns
-      const unmappedResponse = await axios.get(`${API_BASE_URL}/api/unmapped-campaigns`);
+      const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
       // Filter unmapped campaigns by source if needed
       const allUnmapped = unmappedResponse.data;

@@ -34,6 +34,8 @@ import { format, subDays, subMonths, parse } from 'date-fns';
 import SettingsIcon from '@mui/icons-material/Settings';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
+import corsProxy from './utils/corsProxy';
+import CorsTest from './utils/CorsTest';
 
 // Import components
 import CampaignMapping from './components/CampaignMapping';
@@ -115,7 +117,7 @@ function App() {
   const [monthTabs] = useState(generateMonthTabs());
   const [orderBy, setOrderBy] = useState('campaign');
   const [order, setOrder] = useState('asc');
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' or 'campaign-mapping'
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'campaign-mapping', or 'cors-test'
   
   // Settings menu state
   const [anchorEl, setAnchorEl] = useState(null);
@@ -128,8 +130,8 @@ function App() {
     setError(null);
     
     try {
-      // Fetch all campaign data
-      const response = await axios.get(`${API_BASE_URL}/api/campaigns/metrics`);
+      // Fetch all campaign data using CORS proxy
+      const response = await corsProxy.get('/api/campaigns/metrics');
       
       // Transform and store the data
       setCampaignData(response.data);

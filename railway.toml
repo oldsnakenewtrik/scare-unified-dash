@@ -1,8 +1,8 @@
 [build]
-builder = "DOCKERFILE"
+builder = "NIXPACKS"
 
 [deploy]
-startCommand = "./docker_entrypoint.sh"
-healthcheckPath = "/api/health"
+startCommand = "cd src/api && python -m uvicorn super_simple:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

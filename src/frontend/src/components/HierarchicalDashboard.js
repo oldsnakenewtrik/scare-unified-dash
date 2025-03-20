@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -21,6 +21,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import axios from 'axios';
+import corsProxy from '../utils/corsProxy';
 
 // API base URL (set in .env)
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
@@ -44,7 +45,7 @@ function HierarchicalDashboard() {
     setError(null);
 
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/campaigns-hierarchical`);
+      const response = await corsProxy.get('/api/campaigns-hierarchical');
       
       // Process the data into a hierarchical structure
       const organizedData = organizeHierarchicalData(response.data);
@@ -56,7 +57,7 @@ function HierarchicalDashboard() {
       // If we failed to get hierarchical data, try to fall back to regular campaign mappings
       try {
         // This is a temporary fallback to show something while migrations are being applied
-        const mappingsResponse = await axios.get(`${API_BASE_URL}/api/campaign-mappings`);
+        const mappingsResponse = await corsProxy.get('/api/campaign-mappings');
         const fallbackData = organizeFallbackData(mappingsResponse.data);
         setCampaignData(fallbackData);
         setError('Using limited functionality mode while database updates are being applied.');

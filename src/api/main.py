@@ -52,12 +52,18 @@ print("=====================================================")
 print("Python version:", sys.version)
 print("Current working directory:", os.getcwd())
 print("PYTHONPATH:", os.environ.get("PYTHONPATH", "Not set"))
-print("Configuring CORS middleware with origins:", ["*"])
 
-# For production, allow all origins temporarily until we debug the issue
+# For production, specify all allowed origins
 origins = [
-    "*",  # Allow all origins for testing
+    "https://front-production-f6e6.up.railway.app",  # Production frontend
+    "http://localhost:3000",                         # Development frontend
+    "http://127.0.0.1:3000",                         # Alternative local development
+    "http://localhost:8000",                         # Local API testing
+    "http://127.0.0.1:8000",                         # Alternative local API
+    "*",                                             # Allow all origins as fallback
 ]
+
+print(f"Configuring CORS middleware with origins: {origins}")
 
 # Make sure CORS middleware is first in the list
 app.add_middleware(
@@ -74,22 +80,46 @@ print("CORS middleware configured successfully")
 # Custom middleware to ensure CORS headers are present on every response
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
+    origin = request.headers.get("origin", "")
+    
+    # Default response in case there's an error
     try:
         response = await call_next(request)
         
         # Add CORS headers if they're not already present
         if "access-control-allow-origin" not in response.headers:
             print(f"CORS headers not found for path: {request.url.path}. Adding them now.")
-            response.headers["access-control-allow-origin"] = "*"
+            
+            # If the request has a specific origin header that's in our allowed list,
+            # use that exact origin in the response
+            if origin and (origin in origins or "*" in origins):
+                response.headers["access-control-allow-origin"] = origin
+            else:
+                response.headers["access-control-allow-origin"] = "*"
+                
+            response.headers["access-control-allow-credentials"] = "true"
             response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS"
             response.headers["access-control-allow-headers"] = "*"
+            response.headers["access-control-expose-headers"] = "*"
         
         return response
     except Exception as e:
         print(f"Error in CORS middleware: {str(e)}")
-        # Continue even if there's an error
-        response = await call_next(request)
-        return response
+        # Create a new response if there was an error
+        resp = JSONResponse(content={"detail": "Internal server error"}, status_code=500)
+        
+        # Apply CORS headers to error response
+        if origin and (origin in origins or "*" in origins):
+            resp.headers["access-control-allow-origin"] = origin
+        else:
+            resp.headers["access-control-allow-origin"] = "*"
+            
+        resp.headers["access-control-allow-credentials"] = "true"
+        resp.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        resp.headers["access-control-allow-headers"] = "*"
+        resp.headers["access-control-expose-headers"] = "*"
+        
+        return resp
 
 print("CORS middleware configured successfully")
 
