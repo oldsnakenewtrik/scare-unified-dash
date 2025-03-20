@@ -33,9 +33,10 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies with memory optimization - REMOVE --no-deps flag
+# Install dependencies with memory optimization
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir protobuf==3.20.0
+    pip install --no-cache-dir protobuf==3.20.0 && \
+    pip install --no-cache-dir --upgrade --force-reinstall numpy pandas
 
 # Copy the rest of the application
 COPY . /app

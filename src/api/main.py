@@ -27,8 +27,17 @@ Base = declarative_base()
 
 # Run database initialization (creates tables and runs migrations)
 try:
-    from db_init import init_database
+    # Use the correct import path for db_init
+    from src.api.db_init import init_database
     init_database()
+except ImportError:
+    try:
+        # Fallback to local import if the package structure isn't recognized
+        from db_init import init_database
+        init_database()
+    except Exception as e:
+        print(f"Warning: Failed to initialize database: {str(e)}")
+        print("Application will continue to start, but some features may not work correctly")
 except Exception as e:
     print(f"Warning: Failed to initialize database: {str(e)}")
     print("Application will continue to start, but some features may not work correctly")
@@ -1230,6 +1239,14 @@ def get_google_ads_campaigns(db=Depends(get_db)):
     except Exception as e:
         logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Add /api/health endpoint to work with Railway health checks
+@app.get("/api/health")
+def api_health_check():
+    """
+    Simple health check endpoint for Railway
+    """
+    return {"status": "OK"}
 
 # Mount the React frontend static files
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src", "frontend", "build")
