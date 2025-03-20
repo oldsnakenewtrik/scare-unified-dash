@@ -13,6 +13,7 @@ import json
 import yaml
 from pathlib import Path
 from sqlalchemy import text
+import requests
 
 # Set up logging
 logging.basicConfig(
@@ -291,6 +292,132 @@ def check_google_ads_health():
         logger.error(f"❌ Failed to connect to Google Ads API: {str(e)}")
         return False
 
+def fetch_google_ads_data_rest_fallback(start_date, end_date):
+    """
+    Fallback method to fetch data from Google Ads API using REST API instead of gRPC.
+    This is used when the gRPC method fails with 'GRPC target method can't be resolved'.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via REST API from {start_date} to {end_date}...")
+    
+    try:
+        # Get credentials from environment variables or YAML
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        customer_id = GOOGLE_ADS_CUSTOMER_ID
+        
+        # Try to load from YAML if available
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    developer_token = config.get('developer_token', developer_token)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                    break
+        
+        # Ensure customer_id is a string
+        customer_id = str(customer_id)
+        logger.info(f"Using customer ID: {customer_id}")
+        
+        # Get access token
+        token_url = "https://accounts.google.com/o/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            logger.error(f"Failed to get access token: {token_response.text}")
+            return []
+        
+        access_token = token_response.json().get("access_token")
+        
+        # Construct the Google Ads API query
+        query = f"""
+            SELECT
+              campaign.id,
+              campaign.name,
+              metrics.impressions,
+              metrics.clicks,
+              metrics.cost_micros,
+              segments.date
+            FROM campaign
+            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+            LIMIT 1000
+        """
+        
+        # Make the REST API request
+        api_version = "v14"  # Use v14 as that's what's installed in Railway
+        url = f"https://googleads.googleapis.com/{api_version}/customers/{customer_id}/googleAds:search"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "developer-token": developer_token,
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "query": query
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code != 200:
+            logger.error(f"Google Ads API REST request failed: {response.status_code} - {response.text}")
+            return []
+        
+        # Process the response
+        response_json = response.json()
+        results = []
+        
+        if "results" in response_json:
+            for result in response_json["results"]:
+                campaign = result.get("campaign", {})
+                metrics = result.get("metrics", {})
+                segments = result.get("segments", {})
+                
+                row_data = {
+                    "campaign_id": campaign.get("id", ""),
+                    "campaign_name": campaign.get("name", ""),
+                    "impressions": metrics.get("impressions", 0),
+                    "clicks": metrics.get("clicks", 0),
+                    "cost_micros": metrics.get("costMicros", 0),
+                    "date": segments.get("date", "")
+                }
+                
+                results.append(row_data)
+        
+        logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via REST API")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error fetching Google Ads data via REST API: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
 def fetch_google_ads_data(start_date, end_date):
     """
     Fetch data from Google Ads API for the specified date range.
@@ -428,7 +555,10 @@ def fetch_google_ads_data(start_date, end_date):
     
     # If we get here, all query formats failed
     logger.error("All query formats failed. No data fetched from Google Ads API.")
-    return []
+    
+    # Try the REST API fallback
+    logger.info("gRPC method failed, trying REST API fallback...")
+    return fetch_google_ads_data_rest_fallback(start_date, end_date)
 
 def process_google_ads_data(raw_data):
     """
@@ -633,51 +763,43 @@ def store_google_ads_data(processed_data):
         logger.error(traceback.format_exc())
         return 0
 
-def run_google_ads_etl(days=3):
+def run_google_ads_etl(days=7):
     """
     Run the full ETL process for Google Ads data.
     
     Args:
-        days (int): Number of days to go back for data fetching
-        
-    Returns:
-        bool: True if successful, False otherwise
+        days (int): Number of days to fetch data for
     """
-    logger.info(f"Starting Google Ads ETL process, fetching data for the last {days} days")
+    logger.info(f"Starting Google Ads ETL process for the last {days} days...")
     
-    try:
-        # Calculate date range
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=days)
-        
-        # Format dates as strings
-        start_date_str = start_date.strftime('%Y-%m-%d')
-        end_date_str = end_date.strftime('%Y-%m-%d')
-        
-        # Fetch data from API
-        raw_data = fetch_google_ads_data(start_date_str, end_date_str)
-        
-        if not raw_data:
-            logger.warning("No data fetched from Google Ads API")
-            return False
-        
-        # Process the data
-        processed_data = process_google_ads_data(raw_data)
-        
-        # Store in database
-        records_affected = store_google_ads_data(processed_data)
-        
-        if records_affected > 0:
-            logger.info(f"Successfully completed Google Ads ETL process, affected {records_affected} records")
-            return True
-        else:
-            logger.warning("No records affected in the database")
-            return False
-        
-    except Exception as e:
-        logger.error(f"Error running Google Ads ETL process: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
+    # Calculate date range
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=days)
+    
+    # Format dates as strings
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+    
+    logger.info(f"Date range: {start_date_str} to {end_date_str}")
+    
+    # Fetch data from Google Ads API (includes REST fallback if gRPC fails)
+    raw_data = fetch_google_ads_data(start_date_str, end_date_str)
+    
+    if not raw_data:
+        logger.warning("No data fetched from Google Ads API")
+        return
+    
+    # Process the data
+    processed_data = process_google_ads_data(raw_data)
+    
+    # Store in database
+    records_affected = store_google_ads_data(processed_data)
+    
+    if records_affected > 0:
+        logger.info(f"Successfully completed Google Ads ETL process, affected {records_affected} records")
+        return True
+    else:
+        logger.warning("No records affected in the database")
         return False
 
 def backfill_google_ads_data(start_date_str, end_date_str=None):
