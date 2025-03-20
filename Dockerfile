@@ -2,19 +2,25 @@
 # This file is specifically for the Railway deployment
 
 # Build stage for the frontend
-FROM node:16-alpine AS frontend-build
+FROM node:16-bullseye AS frontend-build
 
 WORKDIR /app/frontend
+
+# Configure npm
+RUN npm config set network-timeout 600000 && \
+    npm config set fetch-retry-maxtimeout 600000
 
 # Copy frontend package.json and install dependencies
 COPY src/frontend/package*.json ./
 ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN npm ci
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+RUN npm ci --no-audit --prefer-offline
 
 # Copy frontend source code and build
 COPY src/frontend/ ./
 COPY src/frontend/.env.production ./.env.production
-RUN npm run build
+ENV CI=false
+RUN npm run build --verbose
 
 # Build stage for the backend
 FROM python:3.9-slim AS backend-build
