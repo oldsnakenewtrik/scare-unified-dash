@@ -773,7 +773,7 @@ def main():
     if args.run_once:
         logger.info("Running Google Ads ETL process once...")
         try:
-            run_google_ads_etl(days=args.days)
+            run_google_ads_etl(days_back=args.days)
             logger.info("ETL process completed successfully.")
         except Exception as e:
             logger.error(f"Error running ETL process: {str(e)}")
@@ -786,7 +786,7 @@ def main():
     
     # Run ETL process immediately
     try:
-        run_google_ads_etl(days=args.days)
+        run_google_ads_etl(days_back=args.days)
         logger.info("Initial ETL process completed successfully.")
     except Exception as e:
         logger.error(f"Error running initial ETL process: {str(e)}")
@@ -794,7 +794,7 @@ def main():
         logger.error(traceback.format_exc())
     
     # Schedule ETL process to run at regular intervals
-    schedule.every(args.interval).hours.do(run_google_ads_etl, days=args.days)
+    schedule.every(args.interval).hours.do(run_google_ads_etl, days_back=args.days)
     
     # Keep the script running and check for scheduled jobs
     while True:
