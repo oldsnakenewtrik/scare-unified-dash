@@ -122,7 +122,7 @@ def get_google_ads_client():
                 "client_secret": GOOGLE_ADS_CLIENT_SECRET,
                 "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
                 "use_proto_plus": True,
-                "version": "v14"
+                "version": "v21"
             }
             
             # Create the client
@@ -294,7 +294,7 @@ def fetch_google_ads_data(start_date, end_date):
         return []
     
     try:
-        # Use the service in a way that's compatible with v14
+        # Use the service in a way that's compatible with v21
         ga_service = client.get_service("GoogleAdsService")
         
         # Construct the query to fetch campaign metrics
