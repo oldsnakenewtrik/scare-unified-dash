@@ -8,6 +8,7 @@ WORKDIR /app/frontend
 
 # Copy frontend package.json and install dependencies
 COPY src/frontend/package*.json ./
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm ci
 
 # Copy frontend source code and build
