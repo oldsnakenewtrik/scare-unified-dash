@@ -37,6 +37,6 @@ echo "Initializing database..."
 python ./src/api/db_init.py
 
 # Start the API server
-echo "Starting web server..."
+echo "Starting web server with CORS proxy..."
 cd .
-exec uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
+exec python -m uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port $PORT

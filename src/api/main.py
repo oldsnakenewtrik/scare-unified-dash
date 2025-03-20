@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+import sys
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import List, Optional
@@ -45,16 +46,17 @@ except Exception as e:
 app = FastAPI(title="SCARE Unified Metrics API")
 
 # Configure CORS to allow any origin - THIS IS CRITICAL FOR PRODUCTION
+print("=====================================================")
+print("INITIALIZING FASTAPI APP")
+print("=====================================================")
+print("Python version:", sys.version)
+print("Current working directory:", os.getcwd())
+print("PYTHONPATH:", os.environ.get("PYTHONPATH", "Not set"))
 print("Configuring CORS middleware with origins:", ["*"])
 
 # For production, allow all origins temporarily until we debug the issue
 origins = [
     "*",  # Allow all origins for testing
-    "http://localhost",
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "https://front-production-f6e6.up.railway.app",
-    "https://scare-unified-dash-production.up.railway.app",
 ]
 
 # Make sure CORS middleware is first in the list
@@ -67,6 +69,7 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+print("CORS middleware configured successfully")
 
 # Custom middleware to ensure CORS headers are present on every response
 @app.middleware("http")
