@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     psycopg2-binary==2.9.6 \
     google-ads==17.0.0 \
     google-auth==2.27.0 \
-    google-auth-oauthlib==0.5.3 \
+    google-auth-oauthlib==0.4.6 \
     python-dotenv==1.0.0 \
     schedule==1.2.0 \
     pyyaml==6.0.1

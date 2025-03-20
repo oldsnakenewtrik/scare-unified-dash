@@ -27,7 +27,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir \
+    pandas==1.5.3 \
+    sqlalchemy==1.4.46 \
+    psycopg2-binary==2.9.6 \
+    google-ads==17.0.0 \
+    google-auth==2.27.0 \
+    google-auth-oauthlib==0.4.6 \
+    python-dotenv==1.0.0 \
+    schedule==1.2.0 \
+    pyyaml==6.0.1
 
 # Copy the rest of the application
 COPY . /app
