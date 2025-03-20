@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     pandas==1.5.3 \
     sqlalchemy==1.4.46 \
     psycopg2-binary==2.9.6 \
-    google-ads==21.2.0 \
+    google-ads==17.0.0 \
+    google-auth==2.27.0 \
+    google-auth-oauthlib==0.5.3 \
     python-dotenv==1.0.0 \
     schedule==1.2.0 \
     pyyaml==6.0.1
