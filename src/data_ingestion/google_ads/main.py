@@ -561,22 +561,22 @@ def store_google_ads_data(processed_data):
         logger.error(traceback.format_exc())
         return 0
 
-def run_google_ads_etl(days_back=3):
+def run_google_ads_etl(days=3):
     """
     Run the full ETL process for Google Ads data.
     
     Args:
-        days_back (int): Number of days to go back for data fetching
+        days (int): Number of days to go back for data fetching
         
     Returns:
         bool: True if successful, False otherwise
     """
-    logger.info(f"Starting Google Ads ETL process, fetching data for the last {days_back} days")
+    logger.info(f"Starting Google Ads ETL process, fetching data for the last {days} days")
     
     try:
         # Calculate date range
         end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=days_back)
+        start_date = end_date - timedelta(days=days)
         
         # Format dates as strings
         start_date_str = start_date.strftime('%Y-%m-%d')
@@ -773,7 +773,7 @@ def main():
     if args.run_once:
         logger.info("Running Google Ads ETL process once...")
         try:
-            run_google_ads_etl(days_back=args.days)
+            run_google_ads_etl(days=args.days)
             logger.info("ETL process completed successfully.")
         except Exception as e:
             logger.error(f"Error running ETL process: {str(e)}")
@@ -786,7 +786,7 @@ def main():
     
     # Run ETL process immediately
     try:
-        run_google_ads_etl(days_back=args.days)
+        run_google_ads_etl(days=args.days)
         logger.info("Initial ETL process completed successfully.")
     except Exception as e:
         logger.error(f"Error running initial ETL process: {str(e)}")
@@ -794,7 +794,7 @@ def main():
         logger.error(traceback.format_exc())
     
     # Schedule ETL process to run at regular intervals
-    schedule.every(args.interval).hours.do(run_google_ads_etl, days_back=args.days)
+    schedule.every(args.interval).hours.do(run_google_ads_etl, days=args.days)
     
     # Keep the script running and check for scheduled jobs
     while True:
