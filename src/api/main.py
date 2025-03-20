@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import datetime
 import logging
+import pathlib
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -151,131 +153,207 @@ class UnmappedCampaign(BaseModel):
 # Health check endpoint for verifying server status
 @app.get("/health")
 def health_check(db=Depends(get_db)):
-    """Check API health and database connectivity"""
-    try:
-        # Check database connection
-        db_status = "healthy"
-        tables_status = {}
-        data_counts = {}
-        
-        # Check if all required tables exist
-        required_tables = [
-            "sm_campaign_name_mapping",
-            "sm_fact_google_ads",
-            "sm_fact_bing_ads",
-            "sm_fact_matomo",
-            "sm_fact_redtrack"
-        ]
-        
-        for table in required_tables:
-            try:
-                # Check if table exists
-                result = db.execute(text(f"SELECT to_regclass('public.{table}')")).scalar()
-                tables_status[table] = "exists" if result else "missing"
-                
-                # If table exists, check row count
-                if result:
-                    count = db.execute(text(f"SELECT COUNT(*) FROM public.{table}")).scalar()
-                    data_counts[table] = count
-            except Exception as e:
-                tables_status[table] = f"error: {str(e)}"
-        
-        # Get unique campaign counts
-        campaign_counts = {}
-        for source_table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack"]:
-            if tables_status.get(source_table) == "exists":
-                try:
-                    unique_count = db.execute(
-                        text(f"SELECT COUNT(DISTINCT campaign_id) FROM public.{source_table}")
-                    ).scalar()
-                    campaign_counts[source_table] = unique_count
-                except:
-                    campaign_counts[source_table] = "error"
-        
-        # Count unmapped campaigns
-        unmapped_count = 0
-        try:
-            # This is the same query used in the unmapped campaigns endpoint
-            unmapped_query = """
-                WITH
-                google_unmapped AS (
-                    SELECT COUNT(DISTINCT g.campaign_id) as count
-                    FROM sm_fact_google_ads g
-                    LEFT JOIN sm_campaign_name_mapping m 
-                        ON CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
-                        AND m.source_system = 'Google Ads'
-                    WHERE m.id IS NULL
-                ),
-                bing_unmapped AS (
-                    SELECT COUNT(DISTINCT b.campaign_id) as count
-                    FROM sm_fact_bing_ads b
-                    LEFT JOIN sm_campaign_name_mapping m 
-                        ON CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
-                        AND m.source_system = 'Bing Ads'
-                    WHERE m.id IS NULL
-                ),
-                redtrack_unmapped AS (
-                    SELECT COUNT(DISTINCT r.campaign_id) as count
-                    FROM sm_fact_redtrack r
-                    LEFT JOIN sm_campaign_name_mapping m 
-                        ON CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
-                        AND m.source_system = 'RedTrack'
-                    WHERE m.id IS NULL
-                ),
-                matomo_unmapped AS (
-                    SELECT COUNT(DISTINCT mt.campaign_id) as count
-                    FROM sm_fact_matomo mt
-                    LEFT JOIN sm_campaign_name_mapping m 
-                        ON CAST(mt.campaign_id AS VARCHAR) = m.external_campaign_id 
-                        AND m.source_system = 'Matomo'
-                    WHERE m.id IS NULL
-                )
-                SELECT 
-                    (SELECT count FROM google_unmapped) +
-                    (SELECT count FROM bing_unmapped) +
-                    (SELECT count FROM redtrack_unmapped) +
-                    (SELECT count FROM matomo_unmapped) as total_unmapped
-            """
-            unmapped_count = db.execute(text(unmapped_query)).scalar() or 0
-        except Exception as e:
-            unmapped_count = f"error: {str(e)}"
-        
-        # Get campaign examples if they exist
-        campaign_examples = {}
-        for source_table, pretty_name in [
-            ("sm_fact_google_ads", "Google Ads"),
-            ("sm_fact_bing_ads", "Bing Ads"),
-            ("sm_fact_matomo", "Matomo"),
-            ("sm_fact_redtrack", "RedTrack")
-        ]:
-            if tables_status.get(source_table) == "exists" and data_counts.get(source_table, 0) > 0:
-                try:
-                    examples = db.execute(
-                        text(f"SELECT DISTINCT campaign_id, campaign_name FROM public.{source_table} LIMIT 3")
-                    ).fetchall()
-                    campaign_examples[pretty_name] = [
-                        {"id": row._mapping["campaign_id"], "name": row._mapping["campaign_name"]} 
-                        for row in examples
-                    ]
-                except Exception as e:
-                    campaign_examples[pretty_name] = f"error: {str(e)}"
+    """
+    Health check endpoint that verifies the status of:
+    - Database connection
+    - Required tables
+    - Campaign mappings
+    - Data in fact tables
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "components": {}
+    }
     
-        return {
+    # Check database connection
+    try:
+        db.execute(text("SELECT 1")).fetchone()
+        health_status["components"]["database"] = {
             "status": "healthy",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "database_status": db_status,
-            "tables": tables_status,
-            "row_counts": data_counts,
-            "unique_campaigns": campaign_counts,
-            "unmapped_campaigns": unmapped_count,
-            "campaign_examples": campaign_examples
+            "message": "Database connection successful"
         }
     except Exception as e:
-        return {
+        health_status["status"] = "unhealthy"
+        health_status["components"]["database"] = {
             "status": "unhealthy",
-            "timestamp": datetime.datetime.now().isoformat(),
             "error": str(e)
         }
+        return health_status
+    
+    # Check required tables
+    required_tables = [
+        "sm_campaign_name_mapping",
+        "sm_fact_google_ads",
+        "sm_fact_bing_ads",
+        "sm_fact_matomo",
+        "sm_fact_redtrack"
+    ]
+    
+    try:
+        # Query to check which tables exist
+        table_query = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('sm_campaign_name_mapping', 'sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack')
+        """
+        existing_tables = [row[0] for row in db.execute(text(table_query)).fetchall()]
+        
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if missing_tables:
+            health_status["status"] = "degraded"
+            health_status["components"]["tables"] = {
+                "status": "degraded",
+                "error": f"Missing tables: {', '.join(missing_tables)}",
+                "existing_tables": existing_tables,
+                "missing_tables": missing_tables
+            }
+        else:
+            health_status["components"]["tables"] = {
+                "status": "healthy",
+                "message": "All required tables exist",
+                "tables": existing_tables
+            }
+    except Exception as e:
+        health_status["status"] = "degraded"
+        health_status["components"]["tables"] = {
+            "status": "unhealthy",
+            "error": f"Error checking tables: {str(e)}"
+        }
+    
+    # Check data in fact tables
+    fact_tables = [
+        "sm_fact_google_ads",
+        "sm_fact_bing_ads",
+        "sm_fact_matomo",
+        "sm_fact_redtrack"
+    ]
+    
+    try:
+        fact_table_counts = {}
+        empty_tables = []
+        
+        for table in fact_tables:
+            if table in existing_tables:
+                count_query = f"SELECT COUNT(*) FROM public.{table}"
+                count = db.execute(text(count_query)).scalar() or 0
+                fact_table_counts[table] = count
+                
+                if count == 0:
+                    empty_tables.append(table)
+        
+        if empty_tables:
+            health_status["components"]["fact_data"] = {
+                "status": "degraded",
+                "error": f"Empty fact tables: {', '.join(empty_tables)}",
+                "counts": fact_table_counts
+            }
+            
+            if health_status["status"] == "healthy":
+                health_status["status"] = "degraded"
+        else:
+            health_status["components"]["fact_data"] = {
+                "status": "healthy",
+                "message": "All fact tables have data",
+                "counts": fact_table_counts
+            }
+    except Exception as e:
+        health_status["status"] = "degraded"
+        health_status["components"]["fact_data"] = {
+            "status": "unhealthy",
+            "error": f"Error checking fact data: {str(e)}"
+        }
+    
+    # Check campaign mappings
+    try:
+        if "sm_campaign_name_mapping" in existing_tables:
+            # Get count of mappings
+            mapping_count = db.execute(text("SELECT COUNT(*) FROM public.sm_campaign_name_mapping")).scalar() or 0
+            
+            # Get count of unmapped campaigns
+            unmapped_query = """
+                WITH all_campaigns AS (
+                    SELECT DISTINCT 'Google Ads' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_google_ads WHERE campaign_id IS NOT NULL
+                    UNION ALL
+                    SELECT DISTINCT 'Bing Ads' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_bing_ads WHERE campaign_id IS NOT NULL
+                    UNION ALL
+                    SELECT DISTINCT 'Matomo' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_matomo WHERE campaign_id IS NOT NULL
+                    UNION ALL
+                    SELECT DISTINCT 'RedTrack' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_redtrack WHERE campaign_id IS NOT NULL
+                )
+                SELECT COUNT(*) FROM all_campaigns ac
+                LEFT JOIN public.sm_campaign_name_mapping m ON ac.source = m.source_system AND ac.id = m.external_campaign_id
+                WHERE m.id IS NULL
+            """
+            
+            try:
+                unmapped_count = db.execute(text(unmapped_query)).scalar() or 0
+                
+                # Get counts by source
+                source_counts = {}
+                for source in ["Google Ads", "Bing Ads", "Matomo", "RedTrack"]:
+                    source_query = f"""
+                        SELECT COUNT(*) FROM public.sm_campaign_name_mapping 
+                        WHERE source_system = '{source}'
+                    """
+                    source_count = db.execute(text(source_query)).scalar() or 0
+                    source_counts[source] = source_count
+                
+                if mapping_count == 0:
+                    health_status["components"]["campaign_mappings"] = {
+                        "status": "degraded",
+                        "error": "No campaign mappings found",
+                        "unmapped_count": unmapped_count,
+                        "by_source": source_counts
+                    }
+                    
+                    if health_status["status"] == "healthy":
+                        health_status["status"] = "degraded"
+                elif unmapped_count > 0:
+                    health_status["components"]["campaign_mappings"] = {
+                        "status": "degraded",
+                        "message": f"Found {unmapped_count} unmapped campaigns",
+                        "mapping_count": mapping_count,
+                        "unmapped_count": unmapped_count,
+                        "by_source": source_counts
+                    }
+                    
+                    if health_status["status"] == "healthy":
+                        health_status["status"] = "degraded"
+                else:
+                    health_status["components"]["campaign_mappings"] = {
+                        "status": "healthy",
+                        "message": "All campaigns are mapped",
+                        "mapping_count": mapping_count,
+                        "by_source": source_counts
+                    }
+            except Exception as e:
+                health_status["components"]["campaign_mappings"] = {
+                    "status": "degraded",
+                    "error": f"Error checking unmapped campaigns: {str(e)}",
+                    "mapping_count": mapping_count
+                }
+                
+                if health_status["status"] == "healthy":
+                    health_status["status"] = "degraded"
+        else:
+            health_status["components"]["campaign_mappings"] = {
+                "status": "degraded",
+                "error": "Campaign mapping table does not exist"
+            }
+            
+            if health_status["status"] == "healthy":
+                health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["status"] = "degraded"
+        health_status["components"]["campaign_mappings"] = {
+            "status": "unhealthy",
+            "error": f"Error checking campaign mappings: {str(e)}"
+        }
+    
+    return health_status
 
 # API endpoints
 @app.get("/api/metrics/summary", response_model=List[MetricsSummary])
@@ -585,141 +663,182 @@ def get_unmapped_campaigns(db=Depends(get_db)):
         # First, log counts from each fact table for debugging
         table_counts = {}
         for table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack"]:
-            count_query = f"SELECT COUNT(*) FROM public.{table}"
-            count = db.execute(text(count_query)).scalar() or 0
-            table_counts[table] = count
-            
-            # Also check unique campaigns
-            unique_query = f"SELECT COUNT(DISTINCT campaign_id) FROM public.{table}"
-            unique_count = db.execute(text(unique_query)).scalar() or 0
-            table_counts[f"{table}_unique"] = unique_count
+            try:
+                count_query = f"SELECT COUNT(*) FROM public.{table}"
+                count = db.execute(text(count_query)).scalar() or 0
+                table_counts[table] = count
+                
+                # Also check unique campaigns
+                unique_query = f"SELECT COUNT(DISTINCT campaign_id) FROM public.{table}"
+                unique_count = db.execute(text(unique_query)).scalar() or 0
+                table_counts[f"{table}_unique"] = unique_count
+            except Exception as e:
+                logger.error(f"Error checking table {table}: {str(e)}")
+                table_counts[table] = f"ERROR: {str(e)}"
         
         logger.info(f"Table row counts: {table_counts}")
         
-        # Query for unmapped Google Ads campaigns
-        google_query = """
-            SELECT DISTINCT 
-                'Google Ads' as source_system,
-                g.campaign_id as external_campaign_id,
-                g.campaign_name as campaign_name
-            FROM 
-                sm_fact_google_ads g
-            LEFT JOIN 
-                sm_campaign_name_mapping m ON 
-                CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
-                AND m.source_system = 'Google Ads'
-            WHERE 
-                m.id IS NULL
+        # Check if tables exist
+        table_exists_query = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack', 'sm_campaign_name_mapping')
         """
+        existing_tables = [row[0] for row in db.execute(text(table_exists_query)).fetchall()]
+        logger.info(f"Existing tables: {existing_tables}")
         
-        # Query for unmapped Bing Ads campaigns
-        bing_query = """
-            SELECT DISTINCT 
-                'Bing Ads' as source_system,
-                b.campaign_id as external_campaign_id,
-                b.campaign_name as campaign_name
-            FROM 
-                sm_fact_bing_ads b
-            LEFT JOIN 
-                sm_campaign_name_mapping m ON 
-                CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
-                AND m.source_system = 'Bing Ads'
-            WHERE 
-                m.id IS NULL
-        """
+        # If any tables are missing, create them
+        missing_tables = []
+        for table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack", "sm_campaign_name_mapping"]:
+            if table not in existing_tables:
+                missing_tables.append(table)
         
-        # Query for unmapped RedTrack campaigns
-        redtrack_query = """
-            SELECT DISTINCT 
-                'RedTrack' as source_system,
-                r.campaign_id as external_campaign_id,
-                r.campaign_name as campaign_name
-            FROM 
-                sm_fact_redtrack r
-            LEFT JOIN 
-                sm_campaign_name_mapping m ON 
-                CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
-                AND m.source_system = 'RedTrack'
-            WHERE 
-                m.id IS NULL
-        """
+        if missing_tables:
+            logger.warning(f"Missing tables: {missing_tables}")
+            logger.info("Running database initialization to create missing tables")
+            from src.api.db_init import create_tables_if_not_exist
+            create_tables_if_not_exist(db)
         
-        # Query for unmapped Matomo campaigns
-        matomo_query = """
-            SELECT DISTINCT 
-                'Matomo' as source_system,
-                mt.campaign_id as external_campaign_id,
-                mt.campaign_name as campaign_name
-            FROM 
-                sm_fact_matomo mt
-            LEFT JOIN 
-                sm_campaign_name_mapping m ON 
-                CAST(mt.campaign_id AS VARCHAR) = m.external_campaign_id 
-                AND m.source_system = 'Matomo'
-            WHERE 
-                m.id IS NULL
-        """
+        # Create a list to store all unmapped campaigns
+        unmapped_campaigns = []
         
-        # First, log some example campaigns from each source for debugging
-        for source, query in [
-            ("Google Ads", "SELECT DISTINCT campaign_id, campaign_name FROM sm_fact_google_ads LIMIT 3"),
-            ("Bing Ads", "SELECT DISTINCT campaign_id, campaign_name FROM sm_fact_bing_ads LIMIT 3"),
-            ("RedTrack", "SELECT DISTINCT campaign_id, campaign_name FROM sm_fact_redtrack LIMIT 3"),
-            ("Matomo", "SELECT DISTINCT campaign_id, campaign_name FROM sm_fact_matomo LIMIT 3")
-        ]:
+        # Check if the mapping table exists
+        if "sm_campaign_name_mapping" not in existing_tables:
+            logger.warning("Campaign mapping table does not exist, creating it")
+            from src.api.db_init import create_tables_if_not_exist
+            create_tables_if_not_exist(db)
+        
+        # Process each data source if its table exists
+        if "sm_fact_google_ads" in existing_tables:
+            # Query for unmapped Google Ads campaigns
+            google_query = """
+                SELECT DISTINCT 
+                    'Google Ads' as source_system,
+                    CAST(g.campaign_id AS VARCHAR) as external_campaign_id,
+                    g.campaign_name as campaign_name
+                FROM 
+                    public.sm_fact_google_ads g
+                LEFT JOIN 
+                    public.sm_campaign_name_mapping m ON 
+                    CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
+                    AND m.source_system = 'Google Ads'
+                WHERE 
+                    m.id IS NULL
+            """
+            
             try:
-                examples = db.execute(text(query)).fetchall()
-                if examples:
-                    logger.info(f"{source} examples: {[dict(row._mapping) for row in examples]}")
-                else:
-                    logger.info(f"No {source} campaigns found")
+                google_results = db.execute(text(google_query)).fetchall()
+                logger.info(f"Found {len(google_results)} unmapped Google Ads campaigns")
+                
+                for row in google_results:
+                    unmapped_campaigns.append({
+                        "source_system": row[0],
+                        "external_campaign_id": row[1],
+                        "campaign_name": row[2]
+                    })
             except Exception as e:
-                logger.error(f"Error fetching {source} examples: {str(e)}")
+                logger.error(f"Error querying unmapped Google Ads campaigns: {str(e)}")
         
-        # Union all results
-        union_query = f"""
-            {google_query}
-            UNION ALL
-            {bing_query}
-            UNION ALL
-            {redtrack_query}
-            UNION ALL
-            {matomo_query}
-            ORDER BY source_system, campaign_name
-        """
-        
-        result = db.execute(text(union_query)).fetchall()
-        unmapped_campaigns = [dict(row._mapping) for row in result]
-        
-        # Log the result to help with debugging
-        logger.info(f"Found {len(unmapped_campaigns)} unmapped campaigns")
-        if len(unmapped_campaigns) == 0:
-            logger.info("No unmapped campaigns found. Check if campaign data exists in fact tables.")
+        if "sm_fact_bing_ads" in existing_tables:
+            # Query for unmapped Bing Ads campaigns
+            bing_query = """
+                SELECT DISTINCT 
+                    'Bing Ads' as source_system,
+                    CAST(b.campaign_id AS VARCHAR) as external_campaign_id,
+                    b.campaign_name as campaign_name
+                FROM 
+                    public.sm_fact_bing_ads b
+                LEFT JOIN 
+                    public.sm_campaign_name_mapping m ON 
+                    CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
+                    AND m.source_system = 'Bing Ads'
+                WHERE 
+                    m.id IS NULL
+            """
             
-            # If no unmapped campaigns, check if we have any campaigns at all
-            # This will help diagnose if the issue is no data or everything is already mapped
-            total_mappings = db.execute(text("SELECT COUNT(*) FROM sm_campaign_name_mapping")).scalar() or 0
-            logger.info(f"Total existing mappings: {total_mappings}")
-            
-            # Check if we have campaigns in fact tables
-            total_campaigns = 0
-            for table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack"]:
-                try:
-                    count = db.execute(text(f"SELECT COUNT(DISTINCT campaign_id) FROM {table}")).scalar() or 0
-                    total_campaigns += count
-                except:
-                    pass
-            logger.info(f"Total unique campaigns in fact tables: {total_campaigns}")
+            try:
+                bing_results = db.execute(text(bing_query)).fetchall()
+                logger.info(f"Found {len(bing_results)} unmapped Bing Ads campaigns")
+                
+                for row in bing_results:
+                    unmapped_campaigns.append({
+                        "source_system": row[0],
+                        "external_campaign_id": row[1],
+                        "campaign_name": row[2]
+                    })
+            except Exception as e:
+                logger.error(f"Error querying unmapped Bing Ads campaigns: {str(e)}")
         
-        # Log first few unmapped campaigns for debugging
-        if unmapped_campaigns:
-            for i, campaign in enumerate(unmapped_campaigns[:5]):
-                logger.info(f"Unmapped campaign {i+1}: {campaign}")
+        if "sm_fact_matomo" in existing_tables:
+            # Query for unmapped Matomo campaigns
+            matomo_query = """
+                SELECT DISTINCT 
+                    'Matomo' as source_system,
+                    CAST(m.campaign_id AS VARCHAR) as external_campaign_id,
+                    m.campaign_name as campaign_name
+                FROM 
+                    public.sm_fact_matomo m
+                LEFT JOIN 
+                    public.sm_campaign_name_mapping mm ON 
+                    CAST(m.campaign_id AS VARCHAR) = mm.external_campaign_id 
+                    AND mm.source_system = 'Matomo'
+                WHERE 
+                    mm.id IS NULL
+            """
+            
+            try:
+                matomo_results = db.execute(text(matomo_query)).fetchall()
+                logger.info(f"Found {len(matomo_results)} unmapped Matomo campaigns")
+                
+                for row in matomo_results:
+                    unmapped_campaigns.append({
+                        "source_system": row[0],
+                        "external_campaign_id": row[1],
+                        "campaign_name": row[2]
+                    })
+            except Exception as e:
+                logger.error(f"Error querying unmapped Matomo campaigns: {str(e)}")
+        
+        if "sm_fact_redtrack" in existing_tables:
+            # Query for unmapped RedTrack campaigns
+            redtrack_query = """
+                SELECT DISTINCT 
+                    'RedTrack' as source_system,
+                    CAST(r.campaign_id AS VARCHAR) as external_campaign_id,
+                    r.campaign_name as campaign_name
+                FROM 
+                    public.sm_fact_redtrack r
+                LEFT JOIN 
+                    public.sm_campaign_name_mapping m ON 
+                    CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
+                    AND m.source_system = 'RedTrack'
+                WHERE 
+                    m.id IS NULL
+            """
+            
+            try:
+                redtrack_results = db.execute(text(redtrack_query)).fetchall()
+                logger.info(f"Found {len(redtrack_results)} unmapped RedTrack campaigns")
+                
+                for row in redtrack_results:
+                    unmapped_campaigns.append({
+                        "source_system": row[0],
+                        "external_campaign_id": row[1],
+                        "campaign_name": row[2]
+                    })
+            except Exception as e:
+                logger.error(f"Error querying unmapped RedTrack campaigns: {str(e)}")
+        
+        # Log the total number of unmapped campaigns found
+        logger.info(f"Total unmapped campaigns found: {len(unmapped_campaigns)}")
         
         return unmapped_campaigns
     except Exception as e:
-        logger.error(f"Error in get_unmapped_campaigns: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch unmapped campaigns: {str(e)}")
+        logger.error(f"Error getting unmapped campaigns: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/campaign-mappings", response_model=CampaignMapping)
 def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
@@ -727,70 +846,154 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
     Create a new campaign mapping
     """
     try:
-        # Check if a mapping already exists for this source/id
-        check_query = """
+        # Log the mapping being created
+        logger.info(f"Creating new campaign mapping: {mapping.dict()}")
+        
+        # Check if the mapping table exists
+        table_exists_query = """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'sm_campaign_name_mapping'
+            )
+        """
+        table_exists = db.execute(text(table_exists_query)).scalar()
+        
+        if not table_exists:
+            logger.warning("Campaign mapping table does not exist, creating it")
+            from src.api.db_init import create_tables_if_not_exist
+            create_tables_if_not_exist(db)
+        
+        # Check if a mapping already exists for this campaign
+        check_query = text("""
             SELECT id FROM public.sm_campaign_name_mapping
             WHERE source_system = :source_system AND external_campaign_id = :external_campaign_id
-        """
+        """)
         
-        existing = db.execute(
-            text(check_query), 
-            {"source_system": mapping.source_system, "external_campaign_id": mapping.external_campaign_id}
-        ).fetchone()
+        existing_id = db.execute(check_query, {
+            "source_system": mapping.source_system,
+            "external_campaign_id": mapping.external_campaign_id
+        }).scalar()
         
-        if existing:
-            # Update if it exists
-            query = """
+        if existing_id:
+            # Update existing mapping
+            logger.info(f"Updating existing mapping with ID {existing_id}")
+            
+            update_query = text("""
                 UPDATE public.sm_campaign_name_mapping
-                SET pretty_campaign_name = :pretty_campaign_name,
+                SET 
+                    pretty_campaign_name = :pretty_campaign_name,
                     campaign_category = :campaign_category,
                     campaign_type = :campaign_type,
                     network = :network,
-                    is_active = TRUE,
+                    display_order = :display_order,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
                 RETURNING *
-            """
+            """)
             
-            result = db.execute(
-                text(query),
-                {
-                    "pretty_campaign_name": mapping.pretty_campaign_name,
-                    "campaign_category": mapping.campaign_category,
-                    "campaign_type": mapping.campaign_type,
-                    "network": mapping.network,
-                    "id": existing.id
-                }
-            ).fetchone()
+            result = db.execute(update_query, {
+                "pretty_campaign_name": mapping.pretty_campaign_name,
+                "campaign_category": mapping.campaign_category,
+                "campaign_type": mapping.campaign_type,
+                "network": mapping.network,
+                "display_order": mapping.display_order or 0,
+                "id": existing_id
+            })
             
+            db.commit()
+            
+            # Get the updated mapping
+            updated_mapping = dict(result.fetchone()._mapping)
+            logger.info(f"Updated mapping: {updated_mapping}")
+            return updated_mapping
         else:
-            # Insert if it doesn't exist
-            query = """
-                INSERT INTO public.sm_campaign_name_mapping
-                (source_system, external_campaign_id, original_campaign_name, pretty_campaign_name, campaign_category, campaign_type, network)
-                VALUES
-                (:source_system, :external_campaign_id, :original_campaign_name, :pretty_campaign_name, :campaign_category, :campaign_type, :network)
-                RETURNING *
-            """
+            # Get the original campaign name from the fact table
+            original_name_query = None
             
-            result = db.execute(
-                text(query),
-                {
-                    "source_system": mapping.source_system,
-                    "external_campaign_id": mapping.external_campaign_id,
-                    "original_campaign_name": mapping.original_campaign_name,
-                    "pretty_campaign_name": mapping.pretty_campaign_name,
-                    "campaign_category": mapping.campaign_category,
-                    "campaign_type": mapping.campaign_type,
-                    "network": mapping.network
-                }
-            ).fetchone()
-        
-        db.commit()
-        
-        return dict(result)
+            if mapping.source_system == "Google Ads":
+                original_name_query = text("""
+                    SELECT campaign_name FROM public.sm_fact_google_ads
+                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
+                    LIMIT 1
+                """)
+            elif mapping.source_system == "Bing Ads":
+                original_name_query = text("""
+                    SELECT campaign_name FROM public.sm_fact_bing_ads
+                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
+                    LIMIT 1
+                """)
+            elif mapping.source_system == "Matomo":
+                original_name_query = text("""
+                    SELECT campaign_name FROM public.sm_fact_matomo
+                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
+                    LIMIT 1
+                """)
+            elif mapping.source_system == "RedTrack":
+                original_name_query = text("""
+                    SELECT campaign_name FROM public.sm_fact_redtrack
+                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
+                    LIMIT 1
+                """)
+            
+            original_campaign_name = mapping.original_campaign_name
+            
+            if original_name_query:
+                try:
+                    result = db.execute(original_name_query, {
+                        "external_campaign_id": mapping.external_campaign_id
+                    })
+                    row = result.fetchone()
+                    if row:
+                        original_campaign_name = row[0]
+                except Exception as e:
+                    logger.error(f"Error fetching original campaign name: {str(e)}")
+            
+            # Create new mapping
+            insert_query = text("""
+                INSERT INTO public.sm_campaign_name_mapping (
+                    source_system, 
+                    external_campaign_id, 
+                    original_campaign_name, 
+                    pretty_campaign_name, 
+                    campaign_category, 
+                    campaign_type, 
+                    network, 
+                    display_order
+                )
+                VALUES (
+                    :source_system, 
+                    :external_campaign_id, 
+                    :original_campaign_name, 
+                    :pretty_campaign_name, 
+                    :campaign_category, 
+                    :campaign_type, 
+                    :network, 
+                    :display_order
+                )
+                RETURNING *
+            """)
+            
+            result = db.execute(insert_query, {
+                "source_system": mapping.source_system,
+                "external_campaign_id": mapping.external_campaign_id,
+                "original_campaign_name": original_campaign_name,
+                "pretty_campaign_name": mapping.pretty_campaign_name,
+                "campaign_category": mapping.campaign_category,
+                "campaign_type": mapping.campaign_type,
+                "network": mapping.network,
+                "display_order": mapping.display_order or 0
+            })
+            
+            db.commit()
+            
+            new_mapping = dict(result.fetchone()._mapping)
+            logger.info(f"Created new mapping: {new_mapping}")
+            return new_mapping
     except Exception as e:
-        db.rollback()
+        logger.error(f"Error creating campaign mapping: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/campaign-mappings/{mapping_id}")
@@ -1027,6 +1230,16 @@ def get_google_ads_campaigns(db=Depends(get_db)):
     except Exception as e:
         logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Mount the React frontend static files
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src", "frontend", "build")
+app.mount("/static", StaticFiles(directory=os.path.join(frontend_path, "static")), name="static")
+
+@app.get("/{path:path}")
+async def catch_all_routes(path: str):
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+    return FileResponse(os.path.join(frontend_path, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn

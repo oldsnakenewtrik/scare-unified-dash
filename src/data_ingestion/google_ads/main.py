@@ -12,6 +12,7 @@ import time
 import json
 import yaml
 from pathlib import Path
+from sqlalchemy import text
 
 # Set up logging
 logging.basicConfig(
@@ -47,21 +48,33 @@ def get_db_engine():
     postgres_port = os.getenv('PGPORT', '5432')
     postgres_user = os.getenv('PGUSER', 'postgres')
     postgres_password = os.getenv('PGPASSWORD')
-    postgres_db = os.getenv('POSTGRES_DB', 'railway')
+    postgres_db = os.getenv('PGDATABASE', 'railway')
     
     # Fallback to generic DATABASE_URL if specific variables aren't available
     database_url = os.getenv('DATABASE_URL')
+    railway_database_url = os.getenv('RAILWAY_DATABASE_URL')
+    
+    # Log connection attempt for debugging
+    logger.info("Attempting to create database engine...")
     
     if postgres_password and postgres_host:
         # Construct connection string
         connection_string = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
         logger.info(f"Creating database engine with Railway PostgreSQL variables (host: {postgres_host})")
         return sa.create_engine(connection_string)
+    elif railway_database_url:
+        logger.info("Creating database engine with RAILWAY_DATABASE_URL environment variable")
+        return sa.create_engine(railway_database_url)
     elif database_url:
         logger.info("Creating database engine with DATABASE_URL environment variable")
         return sa.create_engine(database_url)
     else:
         logger.error("No database connection information found in environment variables")
+        # Print available environment variables for debugging
+        logger.info("Available environment variables:")
+        for key in os.environ:
+            if "DATABASE" in key or "PG" in key or "SQL" in key:
+                logger.info(f"  - {key}: {'*' * min(len(os.environ[key]), 5)}")
         return None
 
 # Create engine
@@ -376,190 +389,174 @@ def fetch_google_ads_data(start_date, end_date):
         logger.error(traceback.format_exc())
         return []
 
-def process_google_ads_data(data):
-    """Process and transform Google Ads API data."""
-    processed_data = []
-    
-    for item in data:
-        # Calculate derived metrics
-        clicks = float(item.get('clicks', 0))
-        impressions = float(item.get('impressions', 0))
-        cost_micros = float(item.get('cost_micros', 0))
-        
-        # Add derived fields
-        processed_item = item.copy()
-        processed_item['cost'] = cost_micros / 1_000_000  # Convert micros to dollars
-        processed_item['ctr'] = (clicks / impressions) if impressions > 0 else 0
-        processed_item['average_cpc'] = (cost_micros / clicks) / 1_000_000 if clicks > 0 else 0
-        
-        processed_data.append(processed_item)
-    
-    return processed_data
-
-def store_google_ads_data(data):
+def process_google_ads_data(raw_data):
     """
-    Store the processed Google Ads data in the database.
+    Process raw data from Google Ads API into a format suitable for database storage.
     
     Args:
-        data (List[Dict]): List of processed campaign data dictionaries
+        raw_data (List[Dict]): Raw data from Google Ads API
         
     Returns:
-        int: Number of records inserted/updated
+        List[Dict]: Processed data ready for database insertion
     """
-    if not data:
-        logger.warning("No data to store in the database")
+    logger.info(f"Processing {len(raw_data)} rows of Google Ads data")
+    
+    processed_data = []
+    
+    for row in raw_data:
+        # Convert cost from micros (millionths of the account currency) to actual currency value
+        cost_micros = row.get('cost_micros', 0)
+        cost = float(cost_micros) / 1000000.0 if cost_micros else 0.0
+        
+        # Create a processed row
+        processed_row = {
+            'date': row.get('date'),
+            'campaign_id': str(row.get('campaign_id')),  # Ensure campaign_id is a string
+            'campaign_name': row.get('campaign_name'),
+            'impressions': int(row.get('impressions', 0)),
+            'clicks': int(row.get('clicks', 0)),
+            'cost': cost,  # Converted from micros
+            'conversions': float(row.get('conversions', 0)),
+            'created_at': datetime.now()
+        }
+        
+        processed_data.append(processed_row)
+    
+    logger.info(f"Processed {len(processed_data)} rows of Google Ads data")
+    return processed_data
+
+def store_google_ads_data(processed_data):
+    """
+    Store processed Google Ads data in the database.
+    
+    Args:
+        processed_data (List[Dict]): Processed data ready for database insertion
+        
+    Returns:
+        int: Number of records affected
+    """
+    if not processed_data:
+        logger.warning("No data to store")
         return 0
     
-    logger.info(f"Storing {len(data)} records in the database...")
+    logger.info(f"Storing {len(processed_data)} records in the database...")
     
     try:
+        # Get database engine
+        if not engine:
+            logger.error("No database engine available")
+            return 0
+        
+        # Create a connection
         with engine.connect() as conn:
-            # Get all existing records for the time period
-            existing_records_query = """
-            SELECT 
-                f.fact_google_ads_id, 
-                dc.source_campaign_id, 
-                dd.full_date 
-            FROM scare_metrics.fact_google_ads f
-            JOIN scare_metrics.dim_campaign dc ON f.campaign_id = dc.campaign_id
-            JOIN scare_metrics.dim_date dd ON f.date_id = dd.date_id
-            """
+            # Check if the table exists, create it if not
+            if not conn.dialect.has_table(conn, 'sm_fact_google_ads'):
+                logger.info("Creating sm_fact_google_ads table")
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS public.sm_fact_google_ads (
+                        id SERIAL PRIMARY KEY,
+                        date DATE NOT NULL,
+                        campaign_id VARCHAR(255) NOT NULL,
+                        campaign_name VARCHAR(255) NOT NULL,
+                        impressions INT DEFAULT 0,
+                        clicks INT DEFAULT 0,
+                        cost DECIMAL(12,2) DEFAULT 0,
+                        conversions DECIMAL(12,2) DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT sm_fact_google_ads_date_campaign_id_key UNIQUE (date, campaign_id)
+                    )
+                """))
+                logger.info("sm_fact_google_ads table created")
             
-            existing_df = pd.read_sql(existing_records_query, conn)
-            
-            # Create a lookup for existing records
-            existing_lookup = {}
-            for _, row in existing_df.iterrows():
-                key = f"{row['source_campaign_id']}_{row['full_date'].strftime('%Y-%m-%d')}"
-                existing_lookup[key] = row['fact_google_ads_id']
-            
-            # Start transaction
+            # Begin a transaction
             trans = conn.begin()
             
             try:
-                records_updated = 0
-                records_inserted = 0
+                # Insert data
+                records_affected = 0
                 
-                for item in data:
-                    # Get or create dimension IDs
-                    campaign_id = get_campaign_dimension_id(
-                        campaign_name=item['campaign_name'],
-                        source_campaign_id=str(item['campaign_id'])
-                    )
-                    
-                    date_id = get_date_dimension_id(item['date'])
-                    
-                    # Calculate metrics if not present
-                    clicks = float(item.get('clicks', 0))
-                    impressions = float(item.get('impressions', 0))
-                    cost = float(item.get('cost', 0))
-                    
-                    # Calculate derived metrics if not present
-                    ctr = item.get('ctr')
-                    if ctr is None and impressions > 0:
-                        ctr = clicks / impressions
-                    else:
-                        ctr = 0
-                    
-                    avg_cpc = item.get('average_cpc')
-                    if avg_cpc is None and clicks > 0:
-                        avg_cpc = cost / clicks
-                    else:
-                        avg_cpc = 0
-                    
-                    # Check if record exists
-                    lookup_key = f"{item['campaign_id']}_{item['date']}"
-                    existing_id = existing_lookup.get(lookup_key)
-                    
-                    if existing_id:
-                        # Update existing record
-                        update_query = sa.text("""
-                            UPDATE scare_metrics.fact_google_ads
-                            SET 
-                                impressions = :impressions,
-                                clicks = :clicks,
-                                cost = :cost,
-                                average_cpc = :average_cpc,
-                                ctr = :ctr,
-                                conversions = :conversions,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE fact_google_ads_id = :id
-                        """)
-                        
-                        conn.execute(
-                            update_query, 
-                            {
-                                "id": existing_id,
-                                "impressions": item['impressions'],
-                                "clicks": item['clicks'],
-                                "cost": item['cost'],
-                                "average_cpc": avg_cpc,
-                                "ctr": ctr,
-                                "conversions": item.get('conversions', 0)
-                            }
-                        )
-                        
-                        records_updated += 1
-                    else:
-                        # Insert new record
-                        insert_query = sa.text("""
-                            INSERT INTO scare_metrics.fact_google_ads
-                            (
-                                campaign_id, 
-                                date_id,
-                                impressions, 
-                                clicks, 
-                                cost, 
-                                average_cpc, 
-                                ctr, 
-                                conversions,
-                                created_at,
-                                updated_at
-                            )
-                            VALUES (
-                                :campaign_id, 
-                                :date_id,
-                                :impressions, 
-                                :clicks, 
-                                :cost, 
-                                :average_cpc, 
-                                :ctr, 
-                                :conversions,
-                                CURRENT_TIMESTAMP,
-                                CURRENT_TIMESTAMP
-                            )
-                        """)
-                        
-                        conn.execute(
-                            insert_query, 
-                            {
-                                "campaign_id": campaign_id,
-                                "date_id": date_id,
-                                "impressions": item['impressions'],
-                                "clicks": item['clicks'],
-                                "cost": item['cost'],
-                                "average_cpc": avg_cpc,
-                                "ctr": ctr,
-                                "conversions": item.get('conversions', 0)
-                            }
-                        )
-                        
-                        records_inserted += 1
+                # Check if the table has the unique constraint
+                constraint_query = text("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conrelid = 'public.sm_fact_google_ads'::regclass 
+                    AND contype = 'u'
+                """)
                 
-                # Commit transaction
+                has_constraint = False
+                try:
+                    has_constraint = conn.execute(constraint_query).scalar() > 0
+                except Exception as e:
+                    logger.warning(f"Could not check for constraint: {str(e)}")
+                
+                # If no constraint exists, add one
+                if not has_constraint:
+                    logger.info("Adding unique constraint to sm_fact_google_ads table")
+                    try:
+                        conn.execute(text("""
+                            ALTER TABLE public.sm_fact_google_ads 
+                            ADD CONSTRAINT sm_fact_google_ads_date_campaign_id_key 
+                            UNIQUE (date, campaign_id)
+                        """))
+                        logger.info("Added unique constraint")
+                    except Exception as e:
+                        logger.warning(f"Could not add constraint: {str(e)}")
+                
+                # Use a more robust insert approach that works with or without the constraint
+                for row in processed_data:
+                    try:
+                        # First check if the record exists
+                        check_query = text("""
+                            SELECT id FROM public.sm_fact_google_ads
+                            WHERE date = :date AND campaign_id = :campaign_id
+                        """)
+                        existing_id = conn.execute(check_query, {
+                            'date': row['date'],
+                            'campaign_id': row['campaign_id']
+                        }).scalar()
+                        
+                        if existing_id:
+                            # Update existing record
+                            update_stmt = text("""
+                                UPDATE public.sm_fact_google_ads
+                                SET 
+                                    campaign_name = :campaign_name,
+                                    impressions = :impressions,
+                                    clicks = :clicks,
+                                    cost = :cost,
+                                    conversions = :conversions,
+                                    created_at = :created_at
+                                WHERE id = :id
+                            """)
+                            result = conn.execute(update_stmt, {**row, 'id': existing_id})
+                        else:
+                            # Insert new record
+                            insert_stmt = text("""
+                                INSERT INTO public.sm_fact_google_ads 
+                                (date, campaign_id, campaign_name, impressions, clicks, cost, conversions, created_at)
+                                VALUES (:date, :campaign_id, :campaign_name, :impressions, :clicks, :cost, :conversions, :created_at)
+                            """)
+                            result = conn.execute(insert_stmt, row)
+                        
+                        records_affected += 1
+                    except Exception as e:
+                        logger.error(f"Error inserting/updating row: {str(e)}")
+                        logger.error(f"Row data: {row}")
+                
+                # Commit the transaction
                 trans.commit()
-                
-                logger.info(f"Successfully stored Google Ads data: {records_inserted} inserted, {records_updated} updated")
-                return records_inserted + records_updated
+                logger.info(f"Successfully stored {records_affected} records")
+                return records_affected
                 
             except Exception as e:
-                # Rollback transaction on error
+                # Rollback the transaction on error
                 trans.rollback()
-                logger.error(f"Error in database transaction: {str(e)}")
-                raise
-    
+                logger.error(f"Error storing Google Ads data: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return 0
+                
     except Exception as e:
-        logger.error(f"Error storing Google Ads data: {str(e)}")
+        logger.error(f"Error connecting to database for storing Google Ads data: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return 0
@@ -752,101 +749,64 @@ def main():
     """Main entry point for the Google Ads connector."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Google Ads Connector')
-    parser.add_argument('--check-health', action='store_true',
-                      help='Check the health of the Google Ads connector')
-    parser.add_argument('--backfill', action='store_true',
-                      help='Run a backfill operation')
-    parser.add_argument('--start-date', type=str,
-                      help='Start date for backfill (format: YYYY-MM-DD)')
-    parser.add_argument('--end-date', type=str, 
-                      help='End date for backfill (format: YYYY-MM-DD)')
-    parser.add_argument('--days', type=int, default=3,
-                      help='Number of days to fetch (default: 3)')
-    parser.add_argument('--run-once', action='store_true',
-                      help='Run the ETL process once and exit')
-    parser.add_argument('--service', action='store_true',
-                      help='Run as a service with scheduled tasks')
-    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Google Ads ETL Service')
+    parser.add_argument('--run-once', action='store_true', help='Run ETL process once and exit')
+    parser.add_argument('--days', type=int, default=30, help='Number of days of data to fetch (default: 30)')
+    parser.add_argument('--interval', type=int, default=6, help='Hours between ETL runs (default: 6)')
     args = parser.parse_args()
     
-    if args.check_health:
-        logger.info("Checking Google Ads connector health...")
-        if check_google_ads_health():
-            logger.info("✓ Google Ads connector is healthy")
-            print("✓ Google Ads connector is healthy")
-            return 0
-        else:
-            logger.error("✗ Google Ads connector health check failed")
-            print("✗ Google Ads connector health check failed")
-            return 1
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     
-    elif args.backfill:
-        if not args.start_date:
-            logger.error("Start date is required for backfill")
-            print("✗ Start date is required for backfill")
-            return 1
-        
-        logger.info(f"Running backfill from {args.start_date} to {args.end_date or 'today'}")
-        success = backfill_google_ads_data(args.start_date, args.end_date)
-        
-        if success:
-            logger.info("✓ Backfill completed successfully")
-            print("✓ Backfill completed successfully")
-            return 0
-        else:
-            logger.error("✗ Backfill failed")
-            print("✗ Backfill failed")
-            return 1
+    # Initialize database engine
+    engine = get_db_engine()
     
-    elif args.run_once:
-        logger.info(f"Running Google Ads ETL once for the last {args.days} days")
-        success = run_google_ads_etl(args.days)
-        
-        if success:
-            logger.info("✓ ETL process completed successfully")
-            print("✓ ETL process completed successfully")
-            return 0
-        else:
-            logger.error("✗ ETL process failed")
-            print("✗ ETL process failed")
-            return 1
+    if not engine:
+        logger.error("Failed to initialize database engine. Exiting.")
+        sys.exit(1)
     
-    elif args.service:
-        logger.info("Starting Google Ads connector service with scheduled tasks")
+    # If run-once flag is set, run ETL process once and exit
+    if args.run_once:
+        logger.info("Running Google Ads ETL process once...")
         try:
-            # Add required packages
-            import schedule
-            
-            # Set up scheduled tasks
-            scheduler_thread = setup_scheduled_tasks()
-            
-            # Keep the main thread alive
-            print("✓ Google Ads connector service started successfully")
-            print("  Running every 4 hours, press Ctrl+C to stop")
-            
-            # Keep the main thread alive
-            try:
-                while True:
-                    import time
-                    time.sleep(60)
-            except KeyboardInterrupt:
-                logger.info("Service interrupted by user")
-                print("Service stopped")
-            
-            return 0
-            
+            run_google_ads_etl(days=args.days)
+            logger.info("ETL process completed successfully.")
         except Exception as e:
-            logger.error(f"Error starting service: {str(e)}")
+            logger.error(f"Error running ETL process: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            print(f"✗ Error starting service: {str(e)}")
-            return 1
+        sys.exit(0)
     
-    else:
-        # Default behavior: print help
-        parser.print_help()
-        return 0
+    # Otherwise, run as a service with scheduled ETL runs
+    logger.info(f"Starting Google Ads ETL service with {args.interval} hour interval")
+    
+    # Run ETL process immediately
+    try:
+        run_google_ads_etl(days=args.days)
+        logger.info("Initial ETL process completed successfully.")
+    except Exception as e:
+        logger.error(f"Error running initial ETL process: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
+    # Schedule ETL process to run at regular intervals
+    schedule.every(args.interval).hours.do(run_google_ads_etl, days=args.days)
+    
+    # Keep the script running and check for scheduled jobs
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
+        except KeyboardInterrupt:
+            logger.info("Service stopped by user.")
+            break
+        except Exception as e:
+            logger.error(f"Error in scheduler loop: {str(e)}")
+            time.sleep(300)  # Wait 5 minutes before retrying on error
 
 if __name__ == "__main__":
     import sys
