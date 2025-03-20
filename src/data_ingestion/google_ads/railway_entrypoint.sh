@@ -123,8 +123,8 @@ case "$1" in
         ;;
     etl)
         echo "Running full ETL process..." | tee -a ${ETL_LOGFILE}
-        echo "Command: python ${SCRIPT_DIR}/main.py --days-back ${2:-7}" | tee -a ${ETL_LOGFILE}
-        python ${SCRIPT_DIR}/main.py --days-back "${2:-7}" 2>&1 | tee -a ${ETL_LOGFILE}
+        echo "Command: python ${SCRIPT_DIR}/main.py --days ${2:-7}" | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/main.py --days "${2:-7}" 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     schedule)
         echo "Running scheduled ETL process via cron..." | tee -a ${ETL_LOGFILE}
@@ -133,9 +133,9 @@ case "$1" in
         ;;
     *)
         echo "No specific command provided, defaulting to ETL process..." | tee -a ${ETL_LOGFILE}
-        echo "Command: python ${SCRIPT_DIR}/main.py --days-back 7" | tee -a ${ETL_LOGFILE}
+        echo "Command: python ${SCRIPT_DIR}/main.py --days 7" | tee -a ${ETL_LOGFILE}
         echo "============ EXECUTING MAIN.PY ============" | tee -a ${ETL_LOGFILE}
-        python ${SCRIPT_DIR}/main.py --days-back 7 2>&1 | tee -a ${ETL_LOGFILE}
+        python ${SCRIPT_DIR}/main.py --days 7 2>&1 | tee -a ${ETL_LOGFILE}
         echo "============ MAIN.PY EXECUTION COMPLETE ============" | tee -a ${ETL_LOGFILE}
         ;;
 esac
