@@ -1,26 +1,29 @@
 # This is a multi-stage build Dockerfile for the SCARE Unified Dashboard
 # This file is specifically for the Railway deployment
 
-# Build stage for the frontend
+# Build stage for the frontend - using a minimal approach
 FROM node:16-bullseye AS frontend-build
 
 WORKDIR /app/frontend
 
-# Configure npm
-RUN npm config set network-timeout 600000 && \
-    npm config set fetch-retry-maxtimeout 600000
-
-# Copy frontend package.json and install dependencies
-COPY src/frontend/package*.json ./
-ENV NODE_OPTIONS="--max-old-space-size=4096"
+# Configure system for minimal memory usage
+ENV NODE_OPTIONS="--max-old-space-size=2048 --gc-interval=100"
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
-RUN npm ci --no-audit --prefer-offline
+ENV CI=false
 
-# Copy frontend source code and build
+# First just copy package files
+COPY src/frontend/package.json ./
+COPY src/frontend/package-lock.json ./
+
+# Install dependencies with production flag to reduce memory usage
+RUN npm ci --production --prefer-offline --no-audit --no-optional
+
+# Now copy the source code
 COPY src/frontend/ ./
 COPY src/frontend/.env.production ./.env.production
-ENV CI=false
-RUN npm run build --verbose
+
+# Build with reduced parallel processes
+RUN npm run build --production
 
 # Build stage for the backend
 FROM python:3.9-slim AS backend-build

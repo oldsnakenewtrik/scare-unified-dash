@@ -1,0 +1,12 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "echo 'Building with custom memory settings'"
+
+[deploy]
+startCommand = "/app/docker_entrypoint.sh"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+
+[nixpacks]
+node-memory-available = "3072"
