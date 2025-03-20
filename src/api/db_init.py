@@ -21,27 +21,40 @@ logger = logging.getLogger("db_init")
 # Load environment variables
 load_dotenv()
 
-# Get database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
+# Get database URL from environment - add more fallbacks
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_DATABASE_URL") or "postgresql://scare_user:scare_password@postgres:5432/scare_metrics"
 
 def init_database():
     """Initialize the database with required tables and run migrations"""
-    engine = create_engine(DATABASE_URL)
-    
     try:
+        # Print database URL for debugging (masking password)
+        debug_url = DATABASE_URL
+        if "://" in debug_url and "@" in debug_url:
+            prefix, suffix = debug_url.split("://", 1)
+            auth, remainder = suffix.split("@", 1)
+            if ":" in auth:
+                user, _ = auth.split(":", 1)
+                masked_url = f"{prefix}://{user}:****@{remainder}"
+                logger.info(f"Connecting to database: {masked_url}")
+        
+        engine = create_engine(DATABASE_URL)
+        
         with engine.connect() as conn:
-            # Create tables if they don't exist
-            create_tables_if_not_exist(conn)
-            
-            # Run additional migrations
-            add_display_order_column(conn)
-            remove_unique_constraint(conn)
-            
-            # Insert sample data if tables are empty
-            insert_sample_data(conn)
-            
-            conn.commit()
-            logger.info("Database initialization completed successfully")
+            # Execute everything in a transaction block
+            with conn.begin():
+                # Create tables if they don't exist
+                create_tables_if_not_exist(conn)
+                
+                # Run additional migrations
+                add_display_order_column(conn)
+                remove_unique_constraint(conn)
+                
+                # Insert sample data if tables are empty
+                insert_sample_data(conn)
+                
+                # No conn.commit() needed with transaction block
+                logger.info("Database initialization completed successfully")
+                
     except Exception as e:
         logger.error(f"Database initialization failed: {str(e)}")
         raise

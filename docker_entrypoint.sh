@@ -17,16 +17,16 @@ GOOGLE_ADS_PID=$!
 # Wait a moment to ensure the service starts
 sleep 2
 
-# Check if service started successfully
-if ps -p $GOOGLE_ADS_PID > /dev/null; then
+# Check if service started successfully - use kill -0 instead of ps
+if kill -0 $GOOGLE_ADS_PID 2>/dev/null; then
     echo "Google Ads ETL service started successfully (PID: $GOOGLE_ADS_PID)"
 else
     echo "Warning: Google Ads ETL service failed to start"
 fi
 
-# Check PostgreSQL connection
+# Check PostgreSQL connection using the DATABASE_URL environment variable directly
 echo "Checking database connection..."
-if python -c "import sqlalchemy; import os; engine = sqlalchemy.create_engine(f'postgresql://{os.environ.get(\"PGUSER\")}:{os.environ.get(\"PGPASSWORD\")}@{os.environ.get(\"PGHOST\")}:{os.environ.get(\"PGPORT\")}/{os.environ.get(\"POSTGRES_DB\", \"railway\")}'); conn = engine.connect(); conn.close(); print('Database connection successful!')"; then
+if python -c "import sqlalchemy, os; print('ENV DATABASE_URL:', os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_DATABASE_URL')); engine = sqlalchemy.create_engine(os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_DATABASE_URL')); conn = engine.connect(); conn.close(); print('Database connection successful!')"; then
     echo "Database connection confirmed!"
 else
     echo "Warning: Could not connect to database"

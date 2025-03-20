@@ -33,8 +33,8 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install dependencies with memory optimization
-RUN pip install --no-cache-dir -r requirements.txt --no-deps && \
+# Install dependencies with memory optimization - REMOVE --no-deps flag
+RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir protobuf==3.19.5
 
 # Copy the rest of the application
@@ -48,9 +48,10 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install postgresql-client only in the final image to reduce build memory usage
+# Install postgresql-client and procps for ps command
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from build stage
