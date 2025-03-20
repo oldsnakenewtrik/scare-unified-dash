@@ -115,6 +115,8 @@ class CampaignMappingCreate(BaseModel):
     campaign_category: Optional[str] = None
     campaign_type: Optional[str] = None
     network: Optional[str] = None
+    pretty_network: Optional[str] = None
+    pretty_source: Optional[str] = None
 
 class CampaignMapping(CampaignMappingCreate):
     id: int
@@ -725,7 +727,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 SELECT DISTINCT 
                     'Google Ads' as source_system,
                     CAST(g.campaign_id AS VARCHAR) as external_campaign_id,
-                    g.campaign_name as campaign_name
+                    g.campaign_name as campaign_name,
+                    g.network as network
                 FROM 
                     public.sm_fact_google_ads g
                 LEFT JOIN 
@@ -744,7 +747,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     unmapped_campaigns.append({
                         "source_system": row[0],
                         "external_campaign_id": row[1],
-                        "campaign_name": row[2]
+                        "campaign_name": row[2],
+                        "network": row[3] if len(row) > 3 else None
                     })
             except Exception as e:
                 logger.error(f"Error querying unmapped Google Ads campaigns: {str(e)}")
@@ -755,7 +759,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 SELECT DISTINCT 
                     'Bing Ads' as source_system,
                     CAST(b.campaign_id AS VARCHAR) as external_campaign_id,
-                    b.campaign_name as campaign_name
+                    b.campaign_name as campaign_name,
+                    b.network as network
                 FROM 
                     public.sm_fact_bing_ads b
                 LEFT JOIN 
@@ -774,7 +779,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     unmapped_campaigns.append({
                         "source_system": row[0],
                         "external_campaign_id": row[1],
-                        "campaign_name": row[2]
+                        "campaign_name": row[2],
+                        "network": row[3] if len(row) > 3 else None
                     })
             except Exception as e:
                 logger.error(f"Error querying unmapped Bing Ads campaigns: {str(e)}")
@@ -785,7 +791,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 SELECT DISTINCT 
                     'Matomo' as source_system,
                     CAST(m.campaign_id AS VARCHAR) as external_campaign_id,
-                    m.campaign_name as campaign_name
+                    m.campaign_name as campaign_name,
+                    m.network as network
                 FROM 
                     public.sm_fact_matomo m
                 LEFT JOIN 
@@ -804,7 +811,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     unmapped_campaigns.append({
                         "source_system": row[0],
                         "external_campaign_id": row[1],
-                        "campaign_name": row[2]
+                        "campaign_name": row[2],
+                        "network": row[3] if len(row) > 3 else None
                     })
             except Exception as e:
                 logger.error(f"Error querying unmapped Matomo campaigns: {str(e)}")
@@ -815,7 +823,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                 SELECT DISTINCT 
                     'RedTrack' as source_system,
                     CAST(r.campaign_id AS VARCHAR) as external_campaign_id,
-                    r.campaign_name as campaign_name
+                    r.campaign_name as campaign_name,
+                    r.network as network
                 FROM 
                     public.sm_fact_redtrack r
                 LEFT JOIN 
@@ -834,7 +843,8 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     unmapped_campaigns.append({
                         "source_system": row[0],
                         "external_campaign_id": row[1],
-                        "campaign_name": row[2]
+                        "campaign_name": row[2],
+                        "network": row[3] if len(row) > 3 else None
                     })
             except Exception as e:
                 logger.error(f"Error querying unmapped RedTrack campaigns: {str(e)}")
@@ -849,117 +859,53 @@ def get_unmapped_campaigns(db=Depends(get_db)):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/campaign-mappings", response_model=CampaignMapping)
+@app.post("/api/campaign-mapping", response_model=CampaignMapping)
 def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
     """
     Create a new campaign mapping
     """
     try:
-        # Log the mapping being created
-        logger.info(f"Creating new campaign mapping: {mapping.dict()}")
-        
-        # Check if the mapping table exists
-        table_exists_query = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'sm_campaign_name_mapping'
-            )
+        # Check if mapping exists
+        existing_query = """
+            SELECT * FROM public.sm_campaign_name_mapping
+            WHERE source_system = :source_system
+            AND external_campaign_id = :external_campaign_id
         """
-        table_exists = db.execute(text(table_exists_query)).scalar()
-        
-        if not table_exists:
-            logger.warning("Campaign mapping table does not exist, creating it")
-            from src.api.db_init import create_tables_if_not_exist
-            create_tables_if_not_exist(db)
-        
-        # Check if a mapping already exists for this campaign
-        check_query = text("""
-            SELECT id FROM public.sm_campaign_name_mapping
-            WHERE source_system = :source_system AND external_campaign_id = :external_campaign_id
-        """)
-        
-        existing_id = db.execute(check_query, {
+        existing = db.execute(text(existing_query), {
             "source_system": mapping.source_system,
             "external_campaign_id": mapping.external_campaign_id
-        }).scalar()
+        }).fetchone()
         
-        if existing_id:
+        if existing:
             # Update existing mapping
-            logger.info(f"Updating existing mapping with ID {existing_id}")
-            
-            update_query = text("""
+            query = """
                 UPDATE public.sm_campaign_name_mapping
                 SET 
                     pretty_campaign_name = :pretty_campaign_name,
                     campaign_category = :campaign_category,
                     campaign_type = :campaign_type,
                     network = :network,
-                    display_order = :display_order,
+                    pretty_network = :pretty_network,
+                    pretty_source = :pretty_source,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
                 RETURNING *
-            """)
-            
-            result = db.execute(update_query, {
+            """
+            result = db.execute(text(query), {
+                "id": existing.id,
                 "pretty_campaign_name": mapping.pretty_campaign_name,
                 "campaign_category": mapping.campaign_category,
                 "campaign_type": mapping.campaign_type,
                 "network": mapping.network,
-                "display_order": mapping.display_order or 0,
-                "id": existing_id
-            })
+                "pretty_network": mapping.pretty_network,
+                "pretty_source": mapping.pretty_source
+            }).fetchone()
             
             db.commit()
-            
-            # Get the updated mapping
-            updated_mapping = dict(result.fetchone()._mapping)
-            logger.info(f"Updated mapping: {updated_mapping}")
-            return updated_mapping
+            return dict(result._mapping)
         else:
-            # Get the original campaign name from the fact table
-            original_name_query = None
-            
-            if mapping.source_system == "Google Ads":
-                original_name_query = text("""
-                    SELECT campaign_name FROM public.sm_fact_google_ads
-                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
-                    LIMIT 1
-                """)
-            elif mapping.source_system == "Bing Ads":
-                original_name_query = text("""
-                    SELECT campaign_name FROM public.sm_fact_bing_ads
-                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
-                    LIMIT 1
-                """)
-            elif mapping.source_system == "Matomo":
-                original_name_query = text("""
-                    SELECT campaign_name FROM public.sm_fact_matomo
-                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
-                    LIMIT 1
-                """)
-            elif mapping.source_system == "RedTrack":
-                original_name_query = text("""
-                    SELECT campaign_name FROM public.sm_fact_redtrack
-                    WHERE CAST(campaign_id AS VARCHAR) = :external_campaign_id
-                    LIMIT 1
-                """)
-            
-            original_campaign_name = mapping.original_campaign_name
-            
-            if original_name_query:
-                try:
-                    result = db.execute(original_name_query, {
-                        "external_campaign_id": mapping.external_campaign_id
-                    })
-                    row = result.fetchone()
-                    if row:
-                        original_campaign_name = row[0]
-                except Exception as e:
-                    logger.error(f"Error fetching original campaign name: {str(e)}")
-            
-            # Create new mapping
-            insert_query = text("""
+            # Insert new mapping with ON CONFLICT clause as recommended by senior dev
+            query = """
                 INSERT INTO public.sm_campaign_name_mapping (
                     source_system, 
                     external_campaign_id, 
@@ -968,7 +914,9 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     campaign_category, 
                     campaign_type, 
                     network, 
-                    display_order
+                    display_order,
+                    pretty_network,
+                    pretty_source
                 )
                 VALUES (
                     :source_system, 
@@ -978,31 +926,41 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     :campaign_category, 
                     :campaign_type, 
                     :network, 
-                    :display_order
+                    :display_order,
+                    :pretty_network,
+                    :pretty_source
                 )
+                ON CONFLICT (source_system, external_campaign_id)
+                DO UPDATE SET
+                    original_campaign_name = EXCLUDED.original_campaign_name,
+                    pretty_campaign_name = EXCLUDED.pretty_campaign_name,
+                    campaign_category = EXCLUDED.campaign_category,
+                    campaign_type = EXCLUDED.campaign_type,
+                    network = EXCLUDED.network,
+                    pretty_network = EXCLUDED.pretty_network,
+                    pretty_source = EXCLUDED.pretty_source,
+                    updated_at = CURRENT_TIMESTAMP
                 RETURNING *
-            """)
+            """
             
-            result = db.execute(insert_query, {
+            result = db.execute(text(query), {
                 "source_system": mapping.source_system,
                 "external_campaign_id": mapping.external_campaign_id,
-                "original_campaign_name": original_campaign_name,
+                "original_campaign_name": mapping.original_campaign_name,
                 "pretty_campaign_name": mapping.pretty_campaign_name,
                 "campaign_category": mapping.campaign_category,
                 "campaign_type": mapping.campaign_type,
                 "network": mapping.network,
-                "display_order": mapping.display_order or 0
+                "display_order": mapping.display_order or 0,
+                "pretty_network": mapping.pretty_network,
+                "pretty_source": mapping.pretty_source
             })
             
             db.commit()
-            
-            new_mapping = dict(result.fetchone()._mapping)
-            logger.info(f"Created new mapping: {new_mapping}")
-            return new_mapping
+            return dict(result.fetchone()._mapping)
+    
     except Exception as e:
         logger.error(f"Error creating campaign mapping: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/campaign-mappings/{mapping_id}")

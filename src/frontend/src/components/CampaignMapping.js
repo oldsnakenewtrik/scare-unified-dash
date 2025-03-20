@@ -77,7 +77,9 @@ function CampaignMapping() {
     pretty_campaign_name: '',
     campaign_category: '',
     campaign_type: '',
-    network: ''
+    network: '',
+    pretty_network: '',
+    pretty_source: ''
   });
 
   // Helper function to get source name from tab index
@@ -151,7 +153,9 @@ function CampaignMapping() {
       pretty_campaign_name: campaign.original_campaign_name, // Default to original name
       campaign_category: '',
       campaign_type: '',
-      network: campaign.network || ''
+      network: campaign.network || '',
+      pretty_network: campaign.network || '', // Default to original network
+      pretty_source: campaign.source_system || '' // Default to original source
     });
     setDialogOpen(true);
   };
@@ -171,6 +175,22 @@ function CampaignMapping() {
     setCurrentMapping(prev => ({
       ...prev,
       network: newValue
+    }));
+  };
+
+  // Helper function to handle pretty network input - allow custom values
+  const handlePrettyNetworkChange = (event, newValue) => {
+    setCurrentMapping(prev => ({
+      ...prev,
+      pretty_network: newValue
+    }));
+  };
+
+  // Helper function to handle pretty source input - allow custom values
+  const handlePrettySourceChange = (event, newValue) => {
+    setCurrentMapping(prev => ({
+      ...prev,
+      pretty_source: newValue
     }));
   };
 
@@ -300,7 +320,7 @@ function CampaignMapping() {
                       <TableBody>
                         {unmappedCampaigns.map((campaign) => (
                           <TableRow key={`${campaign.source_system}-${campaign.external_campaign_id}`}>
-                            <TableCell>{campaign.original_campaign_name}</TableCell>
+                            <TableCell>{campaign.campaign_name}</TableCell>
                             <TableCell>{campaign.source_system}</TableCell>
                             <TableCell>{campaign.network || 'Unknown'}</TableCell>
                             <TableCell>{campaign.external_campaign_id}</TableCell>
@@ -308,7 +328,12 @@ function CampaignMapping() {
                               <Button 
                                 variant="contained" 
                                 size="small"
-                                onClick={() => handleCreateMapping(campaign)}
+                                onClick={() => handleCreateMapping({
+                                  source_system: campaign.source_system,
+                                  external_campaign_id: campaign.external_campaign_id,
+                                  original_campaign_name: campaign.campaign_name,
+                                  network: campaign.network
+                                })}
                               >
                                 Map
                               </Button>
@@ -341,7 +366,9 @@ function CampaignMapping() {
                           <TableCell>Category</TableCell>
                           <TableCell>Type</TableCell>
                           <TableCell>Source System</TableCell>
+                          <TableCell>Pretty Source</TableCell>
                           <TableCell>Network</TableCell>
+                          <TableCell>Pretty Network</TableCell>
                           <TableCell align="right">Actions</TableCell>
                         </TableRow>
                       </TableHead>
@@ -353,7 +380,9 @@ function CampaignMapping() {
                             <TableCell>{mapping.campaign_category || 'Uncategorized'}</TableCell>
                             <TableCell>{mapping.campaign_type || 'Uncategorized'}</TableCell>
                             <TableCell>{mapping.source_system}</TableCell>
+                            <TableCell>{mapping.pretty_source || mapping.source_system}</TableCell>
                             <TableCell>{mapping.network || 'Unknown'}</TableCell>
+                            <TableCell>{mapping.pretty_network || mapping.network || 'Unknown'}</TableCell>
                             <TableCell align="right">
                               <Button 
                                 variant="outlined" 
@@ -460,6 +489,44 @@ function CampaignMapping() {
                     {...params}
                     label="Network"
                     name="network"
+                    variant="outlined"
+                    fullWidth
+                  />
+                )}
+              />
+            </FormControl>
+            
+            <FormControl fullWidth>
+              <InputLabel>Pretty Network</InputLabel>
+              <Autocomplete
+                freeSolo
+                options={NETWORKS}
+                value={currentMapping.pretty_network || ''}
+                onChange={handlePrettyNetworkChange}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Pretty Network"
+                    name="pretty_network"
+                    variant="outlined"
+                    fullWidth
+                  />
+                )}
+              />
+            </FormControl>
+            
+            <FormControl fullWidth>
+              <InputLabel>Pretty Source</InputLabel>
+              <Autocomplete
+                freeSolo
+                options={DATA_SOURCES}
+                value={currentMapping.pretty_source || ''}
+                onChange={handlePrettySourceChange}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Pretty Source"
+                    name="pretty_source"
                     variant="outlined"
                     fullWidth
                   />
