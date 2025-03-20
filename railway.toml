@@ -1,19 +1,8 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "./build.sh"
 
 [deploy]
-startCommand = "/app/docker_entrypoint.sh"
+startCommand = "./docker_entrypoint.sh"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-
-[nixpacks]
-node-memory-available = "2048"
-python-version = "3.9"
-install-command = "echo 'Using custom install'"
-build-target = "none"
-
-[[build.steps]]
-name = "Setup"
-command = "chmod +x ./build.sh"

@@ -7,11 +7,11 @@ echo "Python path: $PYTHONPATH"
 echo "Working directory: $(pwd)"
 
 # Create data directory if it doesn't exist
-mkdir -p /app/data
+mkdir -p ./data
 
 # Start Google Ads ETL service in the background
 echo "Starting Google Ads ETL service..."
-python /app/src/data_ingestion/google_ads/main.py --service &
+python ./src/data_ingestion/google_ads/main.py --service &
 GOOGLE_ADS_PID=$!
 
 # Wait a moment to ensure the service starts
@@ -34,9 +34,9 @@ fi
 
 # Run database initialization script
 echo "Initializing database..."
-python /app/src/api/db_init.py
+python ./src/api/db_init.py
 
 # Start the API server
 echo "Starting web server..."
-cd /app
+cd .
 exec uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
