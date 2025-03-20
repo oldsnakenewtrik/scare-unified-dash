@@ -2,12 +2,12 @@
 # This file is specifically for the Railway deployment
 
 # Build stage for the frontend - using a minimal approach
-FROM node:16-bullseye AS frontend-build
+FROM node:16-slim AS frontend-build
 
 WORKDIR /app/frontend
 
 # Configure system for minimal memory usage
-ENV NODE_OPTIONS="--max-old-space-size=2048 --gc-interval=100"
+ENV NODE_OPTIONS="--max-old-space-size=1024 --gc-interval=100"
 ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 ENV CI=false
 
@@ -37,7 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install dependencies with memory optimization
+RUN pip install --no-cache-dir -r requirements.txt --no-deps && \
+    pip install --no-cache-dir protobuf==3.19.5
 
 # Copy the rest of the application
 COPY . /app

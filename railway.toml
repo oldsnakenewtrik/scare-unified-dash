@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "echo 'Building with custom memory settings'"
+buildCommand = "./build.sh"
 
 [deploy]
 startCommand = "/app/docker_entrypoint.sh"
@@ -9,4 +9,11 @@ healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 
 [nixpacks]
-node-memory-available = "3072"
+node-memory-available = "2048"
+python-version = "3.9"
+install-command = "echo 'Using custom install'"
+build-target = "none"
+
+[[build.steps]]
+name = "Setup"
+command = "chmod +x ./build.sh"
