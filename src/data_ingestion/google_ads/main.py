@@ -82,6 +82,9 @@ engine = get_db_engine()
 
 def get_google_ads_client():
     """Create and return a Google Ads API client."""
+    # List of API versions to try, in order of preference
+    versions_to_try = ["v21", "v14", "v16", "v18"]
+    
     try:
         # List of potential YAML file paths to try
         yaml_paths = [
@@ -115,20 +118,33 @@ def get_google_ads_client():
             if not get_access_token():
                 refresh_token()
             
-            # Load credentials from dictionary - more reliable approach
-            credentials = {
-                "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
-                "client_id": GOOGLE_ADS_CLIENT_ID,
-                "client_secret": GOOGLE_ADS_CLIENT_SECRET,
-                "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
-                "use_proto_plus": True,
-                "version": "v21"
-            }
+            # Try each version until one works
+            last_exception = None
+            for version in versions_to_try:
+                try:
+                    logger.info(f"Trying to create Google Ads client with version {version}")
+                    # Load credentials from dictionary - more reliable approach
+                    credentials = {
+                        "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
+                        "client_id": GOOGLE_ADS_CLIENT_ID,
+                        "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+                        "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
+                        "use_proto_plus": True,
+                        "version": version
+                    }
+                    
+                    # Create the client
+                    client = GoogleAdsClient.load_from_dict(credentials)
+                    logger.info(f"Successfully created Google Ads client with version {version}")
+                    return client
+                except Exception as e:
+                    logger.warning(f"Failed to create Google Ads client with version {version}: {str(e)}")
+                    last_exception = e
+                    continue
             
-            # Create the client
-            client = GoogleAdsClient.load_from_dict(credentials)
-            logger.info("Successfully created Google Ads client from environment variables")
-            return client
+            # If we get here, all versions failed
+            logger.error(f"Failed to create Google Ads client with any version: {str(last_exception)}")
+            return None
     except Exception as e:
         logger.error(f"Error creating Google Ads client: {str(e)}")
         return None
@@ -293,12 +309,37 @@ def fetch_google_ads_data(start_date, end_date):
         logger.error("Failed to create Google Ads client. Aborting data fetch.")
         return []
     
-    try:
-        # Use the service in a way that's compatible with v21
-        ga_service = client.get_service("GoogleAdsService")
-        
-        # Construct the query to fetch campaign metrics
-        query = f"""
+    # Define different query formats to try
+    query_formats = [
+        # Simple query with minimal fields (most compatible)
+        f"""
+            SELECT
+              campaign.id,
+              campaign.name,
+              metrics.impressions,
+              metrics.clicks,
+              metrics.cost_micros,
+              segments.date
+            FROM campaign
+            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+            LIMIT 1000
+        """,
+        # Query with campaign budget (might work in some versions)
+        f"""
+            SELECT
+              campaign.id,
+              campaign.name,
+              campaign_budget.amount_micros,
+              metrics.impressions,
+              metrics.clicks,
+              metrics.cost_micros,
+              segments.date
+            FROM campaign
+            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+            LIMIT 1000
+        """,
+        # Query with conversions (might work in some versions)
+        f"""
             SELECT
               campaign.id,
               campaign.name,
@@ -309,85 +350,85 @@ def fetch_google_ads_data(start_date, end_date):
               segments.date
             FROM campaign
             WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY segments.date
+            LIMIT 1000
         """
-        
-        logger.info(f"Executing query: {query}")
-        
-        # Determine the customer ID
-        yaml_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
-            "/app/src/data_ingestion/google_ads/google-ads.yaml",
-            "/app/google-ads.yaml",
-            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
-        ]
-        
-        customer_id = GOOGLE_ADS_CUSTOMER_ID  # Default to env variable
-        
-        # Try to load from YAML if available
-        for path in yaml_paths:
-            if os.path.exists(path):
-                logger.info(f"Loading customer ID from YAML: {path}")
-                with open(path, 'r') as file:
-                    config = yaml.safe_load(file)
-                    yaml_customer_id = config.get('customer_id') or config.get('linked_customer_id') or config.get('login_customer_id')
-                    if yaml_customer_id:
-                        customer_id = yaml_customer_id
-                        logger.info(f"Using customer ID from YAML: {customer_id}")
-                        break
-        
-        # Ensure customer_id is a string
-        customer_id = str(customer_id)
-        logger.info(f"Using customer ID: {customer_id}")
-        
-        # Use search instead of search_stream for better compatibility
-        response = ga_service.search(customer_id=customer_id, query=query)
-        
-        # Process the response into a list of dictionaries
-        results = []
-        row_count = 0
-        
-        for row in response:
-            row_count += 1
-            # Extract the data from the row
-            campaign_id = row.campaign.id
-            campaign_name = row.campaign.name
-            impressions = row.metrics.impressions
-            clicks = row.metrics.clicks
-            cost_micros = row.metrics.cost_micros
-            conversions = row.metrics.conversions
-            date = row.segments.date
+    ]
+    
+    # Try each query format until one works
+    for i, query in enumerate(query_formats):
+        try:
+            logger.info(f"Trying query format {i+1}/{len(query_formats)}")
+            logger.info(f"Executing query: {query}")
             
-            # Create a dictionary for this row
-            row_data = {
-                "campaign_id": campaign_id,
-                "campaign_name": campaign_name,
-                "impressions": impressions,
-                "clicks": clicks,
-                "cost_micros": cost_micros,
-                "conversions": conversions,
-                "date": date
-            }
+            # Determine the customer ID
+            yaml_paths = [
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+                "/app/src/data_ingestion/google_ads/google-ads.yaml",
+                "/app/google-ads.yaml",
+                os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+            ]
             
-            results.append(row_data)
-        
-        logger.info(f"Successfully fetched {row_count} rows of Google Ads data")
-        return results
-        
-    except GoogleAdsException as ex:
-        logger.error(f"Google Ads API error: {ex.error.code().name}")
-        for error in ex.failure.errors:
-            logger.error(f"  - Error message: {error.message}")
-            if error.location:
-                for field_path_element in error.location.field_path_elements:
-                    logger.error(f"    - On field: {field_path_element.field_name}")
-        return []
-        
-    except Exception as e:
-        logger.error(f"Error fetching Google Ads data: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return []
+            customer_id = GOOGLE_ADS_CUSTOMER_ID  # Default to env variable
+            
+            # Try to load from YAML if available
+            for path in yaml_paths:
+                if os.path.exists(path):
+                    logger.info(f"Loading customer ID from YAML: {path}")
+                    with open(path, 'r') as file:
+                        config = yaml.safe_load(file)
+                        yaml_customer_id = config.get('customer_id') or config.get('linked_customer_id') or config.get('login_customer_id')
+                        if yaml_customer_id:
+                            customer_id = yaml_customer_id
+                            logger.info(f"Using customer ID from YAML: {customer_id}")
+                            break
+            
+            # Ensure customer_id is a string
+            customer_id = str(customer_id)
+            logger.info(f"Using customer ID: {customer_id}")
+            
+            # Get the service and execute the query
+            ga_service = client.get_service("GoogleAdsService")
+            response = ga_service.search(customer_id=customer_id, query=query)
+            
+            # Process the response into a list of dictionaries
+            results = []
+            row_count = 0
+            
+            for row in response:
+                row_count += 1
+                # Create a dictionary for this row based on which query format worked
+                row_data = {
+                    "campaign_id": row.campaign.id,
+                    "campaign_name": row.campaign.name,
+                    "impressions": row.metrics.impressions,
+                    "clicks": row.metrics.clicks,
+                    "cost_micros": row.metrics.cost_micros,
+                    "date": row.segments.date
+                }
+                
+                # Add optional fields if they exist in the response
+                if hasattr(row, 'campaign_budget') and hasattr(row.campaign_budget, 'amount_micros'):
+                    row_data["budget_amount_micros"] = row.campaign_budget.amount_micros
+                else:
+                    row_data["budget_amount_micros"] = 0
+                    
+                if hasattr(row.metrics, 'conversions'):
+                    row_data["conversions"] = row.metrics.conversions
+                else:
+                    row_data["conversions"] = 0
+                
+                results.append(row_data)
+            
+            logger.info(f"Successfully fetched {row_count} rows of Google Ads data")
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Query format {i+1} failed: {str(e)}")
+            continue
+    
+    # If we get here, all query formats failed
+    logger.error("All query formats failed. No data fetched from Google Ads API.")
+    return []
 
 def process_google_ads_data(raw_data):
     """
@@ -413,10 +454,11 @@ def process_google_ads_data(raw_data):
             'date': row.get('date'),
             'campaign_id': str(row.get('campaign_id')),  # Ensure campaign_id is a string
             'campaign_name': row.get('campaign_name'),
+            'budget_amount_micros': row.get('budget_amount_micros', 0),
             'impressions': int(row.get('impressions', 0)),
             'clicks': int(row.get('clicks', 0)),
             'cost': cost,  # Converted from micros
-            'conversions': float(row.get('conversions', 0)),
+            'conversions': row.get('conversions', 0),
             'created_at': datetime.now()
         }
         
@@ -451,13 +493,14 @@ def store_google_ads_data(processed_data):
         with engine.connect() as conn:
             # Check if the table exists, create it if not
             if not conn.dialect.has_table(conn, 'sm_fact_google_ads'):
-                logger.info("Creating sm_fact_google_ads table")
+                logger.info("Creating sm_fact_google_ads table...")
                 conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS public.sm_fact_google_ads (
+                    CREATE TABLE public.sm_fact_google_ads (
                         id SERIAL PRIMARY KEY,
                         date DATE NOT NULL,
                         campaign_id VARCHAR(255) NOT NULL,
                         campaign_name VARCHAR(255) NOT NULL,
+                        budget_amount_micros BIGINT DEFAULT 0,
                         impressions INT DEFAULT 0,
                         clicks INT DEFAULT 0,
                         cost DECIMAL(12,2) DEFAULT 0,
@@ -466,7 +509,35 @@ def store_google_ads_data(processed_data):
                         CONSTRAINT sm_fact_google_ads_date_campaign_id_key UNIQUE (date, campaign_id)
                     )
                 """))
-                logger.info("sm_fact_google_ads table created")
+                logger.info("sm_fact_google_ads table created successfully")
+            else:
+                # Check if we need to add the budget_amount_micros column
+                result = conn.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'sm_fact_google_ads' AND column_name = 'budget_amount_micros'
+                """))
+                if not result.fetchone():
+                    logger.info("Adding budget_amount_micros column to sm_fact_google_ads table...")
+                    conn.execute(text("""
+                        ALTER TABLE public.sm_fact_google_ads 
+                        ADD COLUMN budget_amount_micros BIGINT DEFAULT 0
+                    """))
+                    logger.info("budget_amount_micros column added successfully")
+                    
+                # Check if we need to add the conversions column
+                result = conn.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'sm_fact_google_ads' AND column_name = 'conversions'
+                """))
+                if not result.fetchone():
+                    logger.info("Adding conversions column to sm_fact_google_ads table...")
+                    conn.execute(text("""
+                        ALTER TABLE public.sm_fact_google_ads 
+                        ADD COLUMN conversions DECIMAL(12,2) DEFAULT 0
+                    """))
+                    logger.info("conversions column added successfully")
             
             # Begin a transaction
             trans = conn.begin()
@@ -520,6 +591,7 @@ def store_google_ads_data(processed_data):
                                 UPDATE public.sm_fact_google_ads
                                 SET 
                                     campaign_name = :campaign_name,
+                                    budget_amount_micros = :budget_amount_micros,
                                     impressions = :impressions,
                                     clicks = :clicks,
                                     cost = :cost,
@@ -532,8 +604,8 @@ def store_google_ads_data(processed_data):
                             # Insert new record
                             insert_stmt = text("""
                                 INSERT INTO public.sm_fact_google_ads 
-                                (date, campaign_id, campaign_name, impressions, clicks, cost, conversions, created_at)
-                                VALUES (:date, :campaign_id, :campaign_name, :impressions, :clicks, :cost, :conversions, :created_at)
+                                (date, campaign_id, campaign_name, budget_amount_micros, impressions, clicks, cost, conversions, created_at)
+                                VALUES (:date, :campaign_id, :campaign_name, :budget_amount_micros, :impressions, :clicks, :cost, :conversions, :created_at)
                             """)
                             result = conn.execute(insert_stmt, row)
                         
