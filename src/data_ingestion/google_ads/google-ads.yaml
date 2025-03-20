@@ -17,7 +17,7 @@ refresh_token: 1//06N8QV9oElhnrCgYIARAAGAYSNwF-L9IrSGQxpKf6KRwINqzWtxAxq5B8YfMOa
 use_proto_plus: True
 
 # Specify Google Ads API version
-version: v14
+api_version: v11
 
 # Required for proper timezone behavior
 timezone_setting: "America/New_York"

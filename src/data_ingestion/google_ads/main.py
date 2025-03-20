@@ -82,12 +82,17 @@ def get_db_engine():
 engine = get_db_engine()
 
 def get_google_ads_client():
-    """Create and return a Google Ads API client."""
-    # List of API versions to try, in order of preference
-    versions_to_try = ["v21", "v14", "v16", "v18"]
-    
+    """Get a Google Ads API client."""
     try:
-        # List of potential YAML file paths to try
+        # Try to load the client from YAML
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        # Determine the customer ID
         yaml_paths = [
             # Local development path
             os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
@@ -97,57 +102,90 @@ def get_google_ads_client():
             # Railway repository root path
             os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
         ]
-
-        # Try to load from YAML first (preferred method)
-        yaml_path = None
-        for path in yaml_paths:
-            if os.path.exists(path):
-                yaml_path = path
-                logger.info(f"Found google-ads.yaml at: {path}")
-                break
-    
-        if yaml_path:
-            # Load from YAML file
-            logger.info("Creating Google Ads client from YAML file")
-            client = GoogleAdsClient.load_from_storage(yaml_path)
-            logger.info("Successfully created Google Ads client from YAML")
-            return client
-        else:
-            # Fallback to environment variables
-            logger.info("YAML file not found, loading from environment variables")
-            # Check if we need to refresh the token first
-            if not get_access_token():
-                refresh_token()
+        
+        # Try different API versions
+        api_versions = ["v11", "v14", "v16", "v18", "v21"]
+        
+        for api_version in api_versions:
+            logger.info(f"Trying to create Google Ads client with API version {api_version}")
             
-            # Try each version until one works
-            last_exception = None
-            for version in versions_to_try:
-                try:
-                    logger.info(f"Trying to create Google Ads client with version {version}")
-                    # Load credentials from dictionary - more reliable approach
-                    credentials = {
-                        "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
-                        "client_id": GOOGLE_ADS_CLIENT_ID,
-                        "client_secret": GOOGLE_ADS_CLIENT_SECRET,
-                        "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
-                        "use_proto_plus": True,
-                        "version": version
-                    }
-                    
-                    # Create the client
-                    client = GoogleAdsClient.load_from_dict(credentials)
-                    logger.info(f"Successfully created Google Ads client with version {version}")
-                    return client
-                except Exception as e:
-                    logger.warning(f"Failed to create Google Ads client with version {version}: {str(e)}")
-                    last_exception = e
-                    continue
-            
-            # If we get here, all versions failed
-            logger.error(f"Failed to create Google Ads client with any version: {str(last_exception)}")
+            for path in yaml_paths:
+                if os.path.exists(path):
+                    try:
+                        # Explicitly import the version-specific client
+                        if api_version == "v11":
+                            from google.ads.googleads.v11 import GoogleAdsClient
+                        elif api_version == "v14":
+                            from google.ads.googleads.v14 import GoogleAdsClient
+                        elif api_version == "v16":
+                            from google.ads.googleads.v16 import GoogleAdsClient
+                        elif api_version == "v18":
+                            from google.ads.googleads.v18 import GoogleAdsClient
+                        elif api_version == "v21":
+                            from google.ads.googleads.v21 import GoogleAdsClient
+                        else:
+                            # Default to the main client
+                            from google.ads.googleads.client import GoogleAdsClient
+                        
+                        logger.info(f"Loading Google Ads client from YAML: {path}")
+                        client = GoogleAdsClient.load_from_storage(path)
+                        logger.info(f"Successfully created Google Ads client with API version {api_version}")
+                        return client
+                    except Exception as e:
+                        logger.warning(f"Failed to create Google Ads client with API version {api_version} from {path}: {str(e)}")
+                        continue
+        
+        # If we couldn't create a client from YAML, try using environment variables
+        logger.info("Trying to create Google Ads client from environment variables")
+        
+        # Get credentials from environment variables
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        
+        if not all([developer_token, client_id, client_secret, refresh_token]):
+            logger.error("Missing required environment variables for Google Ads API")
             return None
+        
+        # Try different API versions with environment variables
+        for api_version in api_versions:
+            try:
+                # Explicitly import the version-specific client
+                if api_version == "v11":
+                    from google.ads.googleads.v11 import GoogleAdsClient
+                elif api_version == "v14":
+                    from google.ads.googleads.v14 import GoogleAdsClient
+                elif api_version == "v16":
+                    from google.ads.googleads.v16 import GoogleAdsClient
+                elif api_version == "v18":
+                    from google.ads.googleads.v18 import GoogleAdsClient
+                elif api_version == "v21":
+                    from google.ads.googleads.v21 import GoogleAdsClient
+                else:
+                    # Default to the main client
+                    from google.ads.googleads.client import GoogleAdsClient
+                
+                logger.info(f"Creating Google Ads client from environment variables with API version {api_version}")
+                client = GoogleAdsClient.load_from_dict({
+                    "developer_token": developer_token,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "use_proto_plus": True
+                })
+                logger.info(f"Successfully created Google Ads client with API version {api_version}")
+                return client
+            except Exception as e:
+                logger.warning(f"Failed to create Google Ads client with API version {api_version} from environment variables: {str(e)}")
+                continue
+        
+        logger.error("Failed to create Google Ads client with any API version")
+        return None
     except Exception as e:
         logger.error(f"Error creating Google Ads client: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 def get_campaign_dimension_id(campaign_name, source_campaign_id=None):
@@ -356,8 +394,20 @@ def fetch_google_ads_data_rest_fallback(start_date, end_date):
         access_token = token_response.json().get("access_token")
         logger.info("Successfully obtained access token")
         
-        # Try different API versions
-        api_versions = ["v14", "v16", "v18", "v21"]
+        # Try different API versions and endpoint formats
+        api_versions = ["v11", "v14", "v16", "v18", "v21"]
+        endpoint_formats = [
+            # Standard REST API endpoint format
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}:search",
+            # Alternative format with googleAds prefix
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAds:search",
+            # Format with Google Ads service
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAdsService:search",
+            # Format with services path
+            "https://googleads.googleapis.com/{version}/services/googleAdsService:search",
+            # Format with services and customer ID
+            "https://googleads.googleapis.com/{version}/services/googleAdsService/{customer_id}:search"
+        ]
         
         for api_version in api_versions:
             logger.info(f"Trying Google Ads REST API version {api_version}")
@@ -376,61 +426,270 @@ def fetch_google_ads_data_rest_fallback(start_date, end_date):
                 LIMIT 1000
             """
             
-            # Make the REST API request
-            url = f"https://googleads.googleapis.com/{api_version}/customers/{customer_id}:search"
-            
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "developer-token": developer_token,
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "query": query
-            }
-            
-            logger.info(f"Making REST API request to {url}")
-            response = requests.post(url, headers=headers, json=data)
-            
-            if response.status_code != 200:
-                logger.warning(f"Google Ads API REST request failed with version {api_version}: {response.status_code}")
-                logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
-                continue
-            
-            # Process the response
-            try:
-                response_json = response.json()
-                results = []
+            for endpoint_format in endpoint_formats:
+                # Make the REST API request
+                url = endpoint_format.format(version=api_version, customer_id=customer_id)
                 
-                # Check if we have results
-                if "results" in response_json:
-                    for result in response_json["results"]:
-                        campaign = result.get("campaign", {})
-                        metrics = result.get("metrics", {})
-                        segments = result.get("segments", {})
-                        
-                        row_data = {
-                            "campaign_id": campaign.get("id", ""),
-                            "campaign_name": campaign.get("name", ""),
-                            "impressions": metrics.get("impressions", 0),
-                            "clicks": metrics.get("clicks", 0),
-                            "cost_micros": metrics.get("costMicros", 0),
-                            "date": segments.get("date", "")
-                        }
-                        
-                        results.append(row_data)
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "developer-token": developer_token,
+                    "Content-Type": "application/json"
+                }
                 
-                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via REST API v{api_version}")
-                return results
-            except Exception as e:
-                logger.error(f"Error processing REST API response for version {api_version}: {str(e)}")
-                continue
+                data = {
+                    "query": query
+                }
+                
+                logger.info(f"Making REST API request to {url}")
+                response = requests.post(url, headers=headers, json=data)
+                
+                if response.status_code != 200:
+                    logger.warning(f"Google Ads API REST request failed with version {api_version} and endpoint {url}: {response.status_code}")
+                    logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
+                    continue
+                
+                # Process the response
+                try:
+                    response_json = response.json()
+                    results = []
+                    
+                    # Check if we have results
+                    if "results" in response_json:
+                        for result in response_json["results"]:
+                            campaign = result.get("campaign", {})
+                            metrics = result.get("metrics", {})
+                            segments = result.get("segments", {})
+                            
+                            row_data = {
+                                "campaign_id": campaign.get("id", ""),
+                                "campaign_name": campaign.get("name", ""),
+                                "impressions": metrics.get("impressions", 0),
+                                "clicks": metrics.get("clicks", 0),
+                                "cost_micros": metrics.get("costMicros", 0),
+                                "date": segments.get("date", "")
+                            }
+                            
+                            results.append(row_data)
+                    
+                    logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via REST API v{api_version}")
+                    return results
+                except Exception as e:
+                    logger.error(f"Error processing REST API response for version {api_version}: {str(e)}")
+                    continue
         
-        logger.error("All REST API versions failed")
+        logger.error("All REST API versions and endpoints failed")
         return []
         
     except Exception as e:
         logger.error(f"Error fetching Google Ads data via REST API: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def fetch_google_ads_data_discovery_fallback(start_date, end_date):
+    """
+    Fallback method that uses the Google Ads API discovery document to determine the
+    correct API version and endpoint.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via discovery document from {start_date} to {end_date}...")
+    
+    try:
+        # Get credentials from environment variables or YAML
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        customer_id = GOOGLE_ADS_CUSTOMER_ID
+        
+        # Try to load from YAML if available
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    developer_token = config.get('developer_token', developer_token)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                    break
+        
+        # Ensure customer_id is a string
+        customer_id = str(customer_id)
+        logger.info(f"Using customer ID: {customer_id}")
+        
+        # Get access token
+        token_url = "https://accounts.google.com/o/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        logger.info("Requesting OAuth2 access token...")
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            logger.error(f"Failed to get access token: {token_response.text}")
+            return []
+        
+        access_token = token_response.json().get("access_token")
+        logger.info("Successfully obtained access token")
+        
+        # Fetch the discovery document to get the correct API version and endpoints
+        discovery_urls = [
+            "https://googleads.googleapis.com/$discovery/rest?version=v11",
+            "https://googleads.googleapis.com/$discovery/rest?version=v14",
+            "https://googleads.googleapis.com/$discovery/rest?version=v16",
+            "https://googleads.googleapis.com/$discovery/rest?version=v18",
+            "https://googleads.googleapis.com/$discovery/rest?version=v21"
+        ]
+        
+        for discovery_url in discovery_urls:
+            logger.info(f"Fetching discovery document from {discovery_url}")
+            
+            headers = {
+                "Authorization": f"Bearer {access_token}"
+            }
+            
+            discovery_response = requests.get(discovery_url, headers=headers)
+            if discovery_response.status_code != 200:
+                logger.warning(f"Failed to fetch discovery document: {discovery_response.status_code}")
+                continue
+            
+            try:
+                discovery_doc = discovery_response.json()
+                logger.info(f"Successfully fetched discovery document for {discovery_url}")
+                
+                # Extract API version from the discovery document
+                api_version = discovery_doc.get("version")
+                logger.info(f"Discovery document API version: {api_version}")
+                
+                # Find the search method in the discovery document
+                search_method = None
+                resources = discovery_doc.get("resources", {})
+                for resource_name, resource in resources.items():
+                    methods = resource.get("methods", {})
+                    if "search" in methods:
+                        search_method = methods["search"]
+                        logger.info(f"Found search method in resource: {resource_name}")
+                        break
+                    
+                    # Check nested resources
+                    nested_resources = resource.get("resources", {})
+                    for nested_name, nested_resource in nested_resources.items():
+                        nested_methods = nested_resource.get("methods", {})
+                        if "search" in nested_methods:
+                            search_method = nested_methods["search"]
+                            logger.info(f"Found search method in nested resource: {resource_name}.{nested_name}")
+                            break
+                    
+                    if search_method:
+                        break
+                
+                if not search_method:
+                    logger.warning("Could not find search method in discovery document")
+                    continue
+                
+                # Get the HTTP method and path
+                http_method = search_method.get("httpMethod", "POST")
+                path = search_method.get("path", "")
+                
+                logger.info(f"Search method HTTP method: {http_method}")
+                logger.info(f"Search method path: {path}")
+                
+                # Construct the URL
+                base_url = discovery_doc.get("rootUrl", "https://googleads.googleapis.com/")
+                service_path = discovery_doc.get("servicePath", "")
+                full_url = base_url + service_path + path.replace("{+name}", f"customers/{customer_id}")
+                
+                logger.info(f"Constructed URL: {full_url}")
+                
+                # Construct the Google Ads API query
+                query = f"""
+                    SELECT
+                      campaign.id,
+                      campaign.name,
+                      metrics.impressions,
+                      metrics.clicks,
+                      metrics.cost_micros,
+                      segments.date
+                    FROM campaign
+                    WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+                    LIMIT 1000
+                """
+                
+                # Make the API request
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "developer-token": developer_token,
+                    "Content-Type": "application/json"
+                }
+                
+                data = {
+                    "query": query
+                }
+                
+                logger.info(f"Making API request to {full_url}")
+                response = requests.post(full_url, headers=headers, json=data)
+                
+                if response.status_code != 200:
+                    logger.warning(f"API request failed: {response.status_code}")
+                    logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
+                    continue
+                
+                # Process the response
+                try:
+                    response_json = response.json()
+                    results = []
+                    
+                    # Check if we have results
+                    if "results" in response_json:
+                        for result in response_json["results"]:
+                            campaign = result.get("campaign", {})
+                            metrics = result.get("metrics", {})
+                            segments = result.get("segments", {})
+                            
+                            row_data = {
+                                "campaign_id": campaign.get("id", ""),
+                                "campaign_name": campaign.get("name", ""),
+                                "impressions": metrics.get("impressions", 0),
+                                "clicks": metrics.get("clicks", 0),
+                                "cost_micros": metrics.get("costMicros", 0),
+                                "date": segments.get("date", "")
+                            }
+                            
+                            results.append(row_data)
+                    
+                    logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via discovery document")
+                    return results
+                except Exception as e:
+                    logger.error(f"Error processing response: {str(e)}")
+                    continue
+                
+            except Exception as e:
+                logger.error(f"Error parsing discovery document: {str(e)}")
+                continue
+        
+        logger.error("All discovery document attempts failed")
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error in discovery document fallback: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return []
@@ -503,8 +762,20 @@ def fetch_google_ads_data_direct_fallback(start_date, end_date):
         request = AuthRequest()
         credentials.refresh(request)
         
-        # Try different API versions
-        api_versions = ["v14", "v16", "v18", "v21"]
+        # Try different API versions and endpoint formats
+        api_versions = ["v11", "v14", "v16", "v18", "v21"]
+        endpoint_formats = [
+            # Standard REST API endpoint format
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}:search",
+            # Alternative format with googleAds prefix
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAds:search",
+            # Format with Google Ads service
+            "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAdsService:search",
+            # Format with services path
+            "https://googleads.googleapis.com/{version}/services/googleAdsService:search",
+            # Format with services and customer ID
+            "https://googleads.googleapis.com/{version}/services/googleAdsService/{customer_id}:search"
+        ]
         
         for api_version in api_versions:
             logger.info(f"Trying Google Ads API direct HTTP version {api_version}")
@@ -523,24 +794,174 @@ def fetch_google_ads_data_direct_fallback(start_date, end_date):
                 LIMIT 1000
             """
             
-            # Make the direct HTTP request
-            url = f"https://googleads.googleapis.com/{api_version}/customers/{customer_id}:search"
+            for endpoint_format in endpoint_formats:
+                # Make the direct HTTP request
+                url = endpoint_format.format(version=api_version, customer_id=customer_id)
+                
+                headers = {
+                    "Authorization": f"Bearer {credentials.token}",
+                    "developer-token": developer_token,
+                    "Content-Type": "application/json"
+                }
+                
+                data = {
+                    "query": query
+                }
+                
+                logger.info(f"Making direct HTTP request to {url}")
+                response = requests.post(url, headers=headers, json=data)
+                
+                if response.status_code != 200:
+                    logger.warning(f"Google Ads API direct HTTP request failed with version {api_version} and endpoint {url}: {response.status_code}")
+                    logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
+                    continue
+                
+                # Process the response
+                try:
+                    response_json = response.json()
+                    results = []
+                    
+                    # Check if we have results
+                    if "results" in response_json:
+                        for result in response_json["results"]:
+                            campaign = result.get("campaign", {})
+                            metrics = result.get("metrics", {})
+                            segments = result.get("segments", {})
+                            
+                            row_data = {
+                                "campaign_id": campaign.get("id", ""),
+                                "campaign_name": campaign.get("name", ""),
+                                "impressions": metrics.get("impressions", 0),
+                                "clicks": metrics.get("clicks", 0),
+                                "cost_micros": metrics.get("costMicros", 0),
+                                "date": segments.get("date", "")
+                            }
+                            
+                            results.append(row_data)
+                    
+                    logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via direct HTTP v{api_version}")
+                    return results
+                except Exception as e:
+                    logger.error(f"Error processing direct HTTP response for version {api_version}: {str(e)}")
+                    continue
+        
+        logger.error("All direct HTTP API versions and endpoints failed")
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error fetching Google Ads data via direct HTTP: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def fetch_google_ads_data_v11_fallback(start_date, end_date):
+    """
+    Special fallback method specifically for Google Ads API v11.
+    This method uses the exact endpoint format from v11 documentation.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via v11 specific endpoint from {start_date} to {end_date}...")
+    
+    try:
+        # Get credentials from environment variables or YAML
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        customer_id = GOOGLE_ADS_CUSTOMER_ID
+        
+        # Try to load from YAML if available
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    developer_token = config.get('developer_token', developer_token)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                    break
+        
+        # Ensure customer_id is a string
+        customer_id = str(customer_id)
+        logger.info(f"Using customer ID: {customer_id}")
+        
+        # Get access token
+        token_url = "https://accounts.google.com/o/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        logger.info("Requesting OAuth2 access token...")
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            logger.error(f"Failed to get access token: {token_response.text}")
+            return []
+        
+        access_token = token_response.json().get("access_token")
+        logger.info("Successfully obtained access token")
+        
+        # v11 specific endpoint formats
+        endpoint_formats = [
+            # v11 GoogleAdsService.Search endpoint
+            "https://googleads.googleapis.com/v11/customers/{customer_id}/googleAds:search",
+            # Alternative v11 format
+            "https://googleads.googleapis.com/v11/customers/{customer_id}/googleAdsService:search",
+            # Another alternative format
+            "https://googleads.googleapis.com/v11/services/GoogleAdsService/Search"
+        ]
+        
+        # Construct the Google Ads API query
+        query = f"""
+            SELECT
+              campaign.id,
+              campaign.name,
+              metrics.impressions,
+              metrics.clicks,
+              metrics.cost_micros,
+              segments.date
+            FROM campaign
+            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+            LIMIT 1000
+        """
+        
+        for endpoint_format in endpoint_formats:
+            # Make the REST API request
+            url = endpoint_format.format(customer_id=customer_id)
             
             headers = {
-                "Authorization": f"Bearer {credentials.token}",
+                "Authorization": f"Bearer {access_token}",
                 "developer-token": developer_token,
                 "Content-Type": "application/json"
             }
             
+            # v11 specific request format
             data = {
                 "query": query
             }
             
-            logger.info(f"Making direct HTTP request to {url}")
+            logger.info(f"Making v11 specific API request to {url}")
             response = requests.post(url, headers=headers, json=data)
             
             if response.status_code != 200:
-                logger.warning(f"Google Ads API direct HTTP request failed with version {api_version}: {response.status_code}")
+                logger.warning(f"Google Ads API v11 request failed with endpoint {url}: {response.status_code}")
                 logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
                 continue
             
@@ -567,17 +988,377 @@ def fetch_google_ads_data_direct_fallback(start_date, end_date):
                         
                         results.append(row_data)
                 
-                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via direct HTTP v{api_version}")
+                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via v11 specific endpoint")
                 return results
             except Exception as e:
-                logger.error(f"Error processing direct HTTP response for version {api_version}: {str(e)}")
+                logger.error(f"Error processing v11 specific API response: {str(e)}")
                 continue
         
-        logger.error("All direct HTTP API versions failed")
+        logger.error("All v11 specific endpoints failed")
         return []
         
     except Exception as e:
-        logger.error(f"Error fetching Google Ads data via direct HTTP: {str(e)}")
+        logger.error(f"Error fetching Google Ads data via v11 specific endpoint: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def fetch_google_ads_data_v11_special_auth(start_date, end_date):
+    """
+    Special fallback method for Google Ads API v11 with a different authentication approach.
+    This method uses a different way to authenticate with the Google Ads API.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via v11 with special auth from {start_date} to {end_date}...")
+    
+    try:
+        # Get credentials from environment variables or YAML
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        customer_id = GOOGLE_ADS_CUSTOMER_ID
+        
+        # Try to load from YAML if available
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    developer_token = config.get('developer_token', developer_token)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                    break
+        
+        # Ensure customer_id is a string
+        customer_id = str(customer_id)
+        logger.info(f"Using customer ID: {customer_id}")
+        
+        # Import required libraries
+        try:
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request as AuthRequest
+            from google.auth.transport.requests import AuthorizedSession
+        except ImportError:
+            logger.error("Required libraries not installed. Please install google-auth and google-auth-oauthlib.")
+            return []
+        
+        # Create OAuth2 credentials
+        credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://accounts.google.com/o/oauth2/token",
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        
+        # Refresh the credentials
+        request = AuthRequest()
+        credentials.refresh(request)
+        
+        # Create an authorized session
+        authed_session = AuthorizedSession(credentials)
+        
+        # v11 specific endpoint formats
+        endpoint_formats = [
+            # v11 GoogleAdsService.Search endpoint
+            "https://googleads.googleapis.com/v11/customers/{customer_id}/googleAds:search",
+            # Alternative v11 format
+            "https://googleads.googleapis.com/v11/customers/{customer_id}/googleAdsService:search",
+            # Another alternative format
+            "https://googleads.googleapis.com/v11/services/GoogleAdsService/Search"
+        ]
+        
+        # Construct the Google Ads API query
+        query = f"""
+            SELECT
+              campaign.id,
+              campaign.name,
+              metrics.impressions,
+              metrics.clicks,
+              metrics.cost_micros,
+              segments.date
+            FROM campaign
+            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+            LIMIT 1000
+        """
+        
+        for endpoint_format in endpoint_formats:
+            # Make the REST API request
+            url = endpoint_format.format(customer_id=customer_id)
+            
+            headers = {
+                "developer-token": developer_token,
+                "Content-Type": "application/json"
+            }
+            
+            # v11 specific request format
+            data = {
+                "query": query
+            }
+            
+            logger.info(f"Making v11 special auth API request to {url}")
+            response = authed_session.post(url, headers=headers, json=data)
+            
+            if response.status_code != 200:
+                logger.warning(f"Google Ads API v11 special auth request failed with endpoint {url}: {response.status_code}")
+                logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
+                continue
+            
+            # Process the response
+            try:
+                response_json = response.json()
+                results = []
+                
+                # Check if we have results
+                if "results" in response_json:
+                    for result in response_json["results"]:
+                        campaign = result.get("campaign", {})
+                        metrics = result.get("metrics", {})
+                        segments = result.get("segments", {})
+                        
+                        row_data = {
+                            "campaign_id": campaign.get("id", ""),
+                            "campaign_name": campaign.get("name", ""),
+                            "impressions": metrics.get("impressions", 0),
+                            "clicks": metrics.get("clicks", 0),
+                            "cost_micros": metrics.get("costMicros", 0),
+                            "date": segments.get("date", "")
+                        }
+                        
+                        results.append(row_data)
+                
+                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via v11 special auth")
+                return results
+            except Exception as e:
+                logger.error(f"Error processing v11 special auth API response: {str(e)}")
+                continue
+        
+        logger.error("All v11 special auth endpoints failed")
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error fetching Google Ads data via v11 special auth: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def fetch_google_ads_data_report_fetcher_fallback(start_date, end_date):
+    """
+    Last resort fallback method that uses a different approach to fetch Google Ads data.
+    This method mimics the approach used by Google's ads-api-report-fetcher.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via report fetcher approach from {start_date} to {end_date}...")
+    
+    try:
+        # Get credentials from environment variables or YAML
+        developer_token = GOOGLE_ADS_DEVELOPER_TOKEN
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        customer_id = GOOGLE_ADS_CUSTOMER_ID
+        
+        # Try to load from YAML if available
+        yaml_paths = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+            "/app/src/data_ingestion/google_ads/google-ads.yaml",
+            "/app/google-ads.yaml",
+            os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+        ]
+        
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    developer_token = config.get('developer_token', developer_token)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                    break
+        
+        # Ensure customer_id is a string without dashes
+        customer_id = str(customer_id).replace('-', '')
+        logger.info(f"Using customer ID: {customer_id}")
+        
+        # Get access token
+        token_url = "https://accounts.google.com/o/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        logger.info("Requesting OAuth2 access token...")
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            logger.error(f"Failed to get access token: {token_response.text}")
+            return []
+        
+        access_token = token_response.json().get("access_token")
+        logger.info("Successfully obtained access token")
+        
+        # Try the alternative AWQL format (older format that might work with older API versions)
+        report_download_url = "https://adwords.google.com/api/adwords/reportdownload/v201809"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "developerToken": developer_token,
+            "clientCustomerId": customer_id,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        # AWQL query format
+        awql_query = f"""
+            SELECT CampaignId, CampaignName, Impressions, Clicks, Cost, Date
+            FROM CAMPAIGN_PERFORMANCE_REPORT
+            WHERE Date BETWEEN '{start_date.replace('-', '')}'
+            AND '{end_date.replace('-', '')}'
+        """
+        
+        data = {
+            "__rdquery": awql_query,
+            "__fmt": "JSON"
+        }
+        
+        logger.info(f"Making AWQL report API request to {report_download_url}")
+        response = requests.post(report_download_url, headers=headers, data=data)
+        
+        if response.status_code != 200:
+            logger.warning(f"AWQL report API request failed: {response.status_code}")
+            logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars to avoid huge logs
+            return []
+        
+        # Process the response
+        try:
+            # Try to parse as JSON first
+            try:
+                response_json = response.json()
+                results = []
+                
+                # Check if we have results in the AWQL format
+                if "report" in response_json:
+                    report = response_json.get("report", {})
+                    rows = report.get("rows", [])
+                    
+                    for row in rows:
+                        row_data = {
+                            "campaign_id": row.get("CampaignId", ""),
+                            "campaign_name": row.get("CampaignName", ""),
+                            "impressions": int(row.get("Impressions", 0)),
+                            "clicks": int(row.get("Clicks", 0)),
+                            "cost_micros": int(float(row.get("Cost", 0)) * 1000000),  # Convert to micros
+                            "date": row.get("Date", "")
+                        }
+                        
+                        results.append(row_data)
+                
+                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via report fetcher approach")
+                return results
+            except ValueError:
+                # If not JSON, try to parse as CSV
+                import csv
+                from io import StringIO
+                
+                csv_data = StringIO(response.text)
+                reader = csv.DictReader(csv_data)
+                results = []
+                
+                for row in reader:
+                    row_data = {
+                        "campaign_id": row.get("Campaign ID", ""),
+                        "campaign_name": row.get("Campaign", ""),
+                        "impressions": int(row.get("Impressions", 0)),
+                        "clicks": int(row.get("Clicks", 0)),
+                        "cost_micros": int(float(row.get("Cost", 0)) * 1000000),  # Convert to micros
+                        "date": row.get("Day", "")
+                    }
+                    
+                    results.append(row_data)
+                
+                logger.info(f"Successfully fetched {len(results)} rows of Google Ads data via report fetcher approach (CSV)")
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error processing report fetcher API response: {str(e)}")
+            return []
+        
+    except Exception as e:
+        logger.error(f"Error fetching Google Ads data via report fetcher approach: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def fetch_google_ads_data_fallback(start_date, end_date):
+    """
+    Fallback method to fetch data from Google Ads API.
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        
+    Returns:
+        List[Dict]: List of campaign performance data dictionaries
+    """
+    logger.info(f"Attempting to fetch Google Ads data via fallback from {start_date} to {end_date}...")
+    
+    try:
+        # Try the v11 special auth first
+        logger.info("Trying v11 special auth fallback...")
+        results = fetch_google_ads_data_v11_special_auth(start_date, end_date)
+        
+        if not results:
+            # Try the v11 specific fallback
+            logger.info("v11 special auth fallback failed, trying v11 specific fallback...")
+            results = fetch_google_ads_data_v11_fallback(start_date, end_date)
+            
+            if not results:
+                # Try the REST API fallback
+                logger.info("v11 specific fallback failed, trying REST API fallback...")
+                results = fetch_google_ads_data_rest_fallback(start_date, end_date)
+                
+                if not results:
+                    # Try the discovery document fallback
+                    logger.info("REST API fallback failed, trying discovery document fallback...")
+                    results = fetch_google_ads_data_discovery_fallback(start_date, end_date)
+                    
+                    if not results:
+                        # Try the direct HTTP fallback
+                        logger.info("Discovery document fallback failed, trying direct HTTP fallback...")
+                        results = fetch_google_ads_data_direct_fallback(start_date, end_date)
+                        
+                        if not results:
+                            # Last resort: try the report fetcher approach
+                            logger.info("Direct HTTP fallback failed, trying report fetcher approach...")
+                            results = fetch_google_ads_data_report_fetcher_fallback(start_date, end_date)
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in fallback method: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return []
@@ -595,63 +1376,41 @@ def fetch_google_ads_data(start_date, end_date):
     """
     logger.info(f"Fetching Google Ads data from {start_date} to {end_date}...")
     
+    # Print debug information
+    debug_google_ads_environment()
+    
     client = get_google_ads_client()
     if not client:
         logger.error("Failed to create Google Ads client. Aborting data fetch.")
-        return []
+        return fetch_google_ads_data_fallback(start_date, end_date)
     
-    # Define different query formats to try
-    query_formats = [
-        # Simple query with minimal fields (most compatible)
-        f"""
-            SELECT
-              campaign.id,
-              campaign.name,
-              metrics.impressions,
-              metrics.clicks,
-              metrics.cost_micros,
-              segments.date
-            FROM campaign
-            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
-            LIMIT 1000
-        """,
-        # Query with campaign budget (might work in some versions)
-        f"""
-            SELECT
-              campaign.id,
-              campaign.name,
-              campaign_budget.amount_micros,
-              metrics.impressions,
-              metrics.clicks,
-              metrics.cost_micros,
-              segments.date
-            FROM campaign
-            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
-            LIMIT 1000
-        """,
-        # Query with conversions (might work in some versions)
-        f"""
-            SELECT
-              campaign.id,
-              campaign.name,
-              metrics.impressions,
-              metrics.clicks,
-              metrics.cost_micros,
-              metrics.conversions,
-              segments.date
-            FROM campaign
-            WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
-            LIMIT 1000
-        """
-    ]
+    # Try different API versions explicitly
+    api_versions = ["v11", "v14", "v16", "v18", "v21"]
     
-    # Try each query format until one works
-    for i, query in enumerate(query_formats):
+    for api_version in api_versions:
+        logger.info(f"Trying to fetch Google Ads data with API version {api_version}")
+        
         try:
-            logger.info(f"Trying query format {i+1}/{len(query_formats)}")
-            logger.info(f"Executing query: {query}")
+            # Explicitly import the version-specific service
+            if api_version == "v11":
+                from google.ads.googleads.v11.services.services.google_ads_service import GoogleAdsServiceClient
+            elif api_version == "v14":
+                from google.ads.googleads.v14.services.services.google_ads_service import GoogleAdsServiceClient
+            elif api_version == "v16":
+                from google.ads.googleads.v16.services.services.google_ads_service import GoogleAdsServiceClient
+            elif api_version == "v18":
+                from google.ads.googleads.v18.services.services.google_ads_service import GoogleAdsServiceClient
+            elif api_version == "v21":
+                from google.ads.googleads.v21.services.services.google_ads_service import GoogleAdsServiceClient
+            else:
+                # Skip if we can't import the specific version
+                logger.warning(f"Skipping API version {api_version} - no direct import available")
+                continue
             
-            # Determine the customer ID
+            # Get the customer ID
+            customer_id = GOOGLE_ADS_CUSTOMER_ID
+            
+            # Try to load from YAML if available
             yaml_paths = [
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
                 "/app/src/data_ingestion/google_ads/google-ads.yaml",
@@ -659,77 +1418,107 @@ def fetch_google_ads_data(start_date, end_date):
                 os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
             ]
             
-            customer_id = GOOGLE_ADS_CUSTOMER_ID  # Default to env variable
-            
-            # Try to load from YAML if available
             for path in yaml_paths:
                 if os.path.exists(path):
-                    logger.info(f"Loading customer ID from YAML: {path}")
                     with open(path, 'r') as file:
                         config = yaml.safe_load(file)
-                        yaml_customer_id = config.get('customer_id') or config.get('linked_customer_id') or config.get('login_customer_id')
-                        if yaml_customer_id:
-                            customer_id = yaml_customer_id
-                            logger.info(f"Using customer ID from YAML: {customer_id}")
-                            break
+                        customer_id = config.get('customer_id', customer_id) or config.get('login_customer_id', customer_id)
+                        break
             
             # Ensure customer_id is a string
             customer_id = str(customer_id)
             logger.info(f"Using customer ID: {customer_id}")
             
-            # Get the service and execute the query
-            ga_service = client.get_service("GoogleAdsService")
-            response = ga_service.search(customer_id=customer_id, query=query)
+            # Create the service client
+            google_ads_service = client.get_service("GoogleAdsService", version=api_version)
             
-            # Process the response into a list of dictionaries
-            results = []
-            row_count = 0
+            # Try different query formats
+            query_formats = [
+                # Format 1: Standard Google Ads Query Language (GAQL)
+                f"""
+                    SELECT
+                      campaign.id,
+                      campaign.name,
+                      metrics.impressions,
+                      metrics.clicks,
+                      metrics.cost_micros,
+                      segments.date
+                    FROM campaign
+                    WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+                """,
+                # Format 2: Alternative syntax with date range
+                f"""
+                    SELECT
+                      campaign.id,
+                      campaign.name,
+                      metrics.impressions,
+                      metrics.clicks,
+                      metrics.cost_micros,
+                      segments.date
+                    FROM campaign
+                    WHERE segments.date >= '{start_date}' AND segments.date <= '{end_date}'
+                """,
+                # Format 3: Simplified query
+                f"""
+                    SELECT
+                      campaign.id,
+                      campaign.name,
+                      metrics.impressions,
+                      metrics.clicks,
+                      metrics.cost_micros,
+                      segments.date
+                    FROM campaign
+                """
+            ]
             
-            for row in response:
-                row_count += 1
-                # Create a dictionary for this row based on which query format worked
-                row_data = {
-                    "campaign_id": row.campaign.id,
-                    "campaign_name": row.campaign.name,
-                    "impressions": row.metrics.impressions,
-                    "clicks": row.metrics.clicks,
-                    "cost_micros": row.metrics.cost_micros,
-                    "date": row.segments.date
-                }
-                
-                # Add optional fields if they exist in the response
-                if hasattr(row, 'campaign_budget') and hasattr(row.campaign_budget, 'amount_micros'):
-                    row_data["budget_amount_micros"] = row.campaign_budget.amount_micros
-                else:
-                    row_data["budget_amount_micros"] = 0
+            for i, query in enumerate(query_formats):
+                try:
+                    logger.info(f"Executing query format {i+1} with API version {api_version}")
                     
-                if hasattr(row.metrics, 'conversions'):
-                    row_data["conversions"] = row.metrics.conversions
-                else:
-                    row_data["conversions"] = 0
-                
-                results.append(row_data)
-            
-            logger.info(f"Successfully fetched {row_count} rows of Google Ads data")
-            return results
-            
+                    # Execute the query
+                    search_request = client.get_type("SearchGoogleAdsRequest", version=api_version)
+                    search_request.customer_id = customer_id
+                    search_request.query = query
+                    
+                    # Make the request
+                    response = google_ads_service.search(request=search_request)
+                    
+                    # Process the results
+                    results = []
+                    for row in response:
+                        try:
+                            # Extract data from the row
+                            campaign = row.campaign
+                            metrics = row.metrics
+                            segments = row.segments
+                            
+                            # Create a dictionary with the data
+                            row_data = {
+                                "campaign_id": campaign.id,
+                                "campaign_name": campaign.name,
+                                "impressions": metrics.impressions,
+                                "clicks": metrics.clicks,
+                                "cost_micros": metrics.cost_micros,
+                                "date": segments.date
+                            }
+                            
+                            results.append(row_data)
+                        except Exception as e:
+                            logger.warning(f"Error processing row: {str(e)}")
+                            continue
+                    
+                    logger.info(f"Successfully fetched {len(results)} rows of Google Ads data with API version {api_version}")
+                    return results
+                except Exception as e:
+                    logger.warning(f"Query format {i+1} failed with API version {api_version}: {str(e)}")
+                    continue
         except Exception as e:
-            logger.warning(f"Query format {i+1} failed: {str(e)}")
+            logger.warning(f"Failed to use API version {api_version}: {str(e)}")
             continue
     
-    # If we get here, all query formats failed
-    logger.error("All query formats failed. No data fetched from Google Ads API.")
-    
-    # Try the REST API fallback
-    logger.info("gRPC method failed, trying REST API fallback...")
-    results = fetch_google_ads_data_rest_fallback(start_date, end_date)
-    
-    if not results:
-        # Try the direct HTTP fallback
-        logger.info("REST API fallback failed, trying direct HTTP fallback...")
-        results = fetch_google_ads_data_direct_fallback(start_date, end_date)
-    
-    return results
+    # If all API versions failed, try the fallback methods
+    logger.warning("All API versions failed. Trying fallback methods.")
+    return fetch_google_ads_data_fallback(start_date, end_date)
 
 def process_google_ads_data(raw_data):
     """
@@ -1110,6 +1899,147 @@ def setup_scheduled_tasks():
     
     return scheduler_thread
 
+def debug_google_ads_environment():
+    """Debug function to print information about the Google Ads API environment."""
+    logger.info("Debugging Google Ads environment...")
+    
+    # Print Python version
+    import sys
+    logger.info(f"Python version: {sys.version}")
+    
+    # Print installed packages
+    import pkg_resources
+    logger.info("Installed packages:")
+    for pkg in pkg_resources.working_set:
+        logger.info(f"  {pkg.project_name}=={pkg.version}")
+    
+    # Print environment variables (redacted)
+    logger.info("Environment variables (redacted):")
+    env_vars = [
+        "GOOGLE_ADS_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET",
+        "GOOGLE_ADS_REFRESH_TOKEN",
+        "GOOGLE_ADS_CUSTOMER_ID"
+    ]
+    for var in env_vars:
+        value = os.environ.get(var, "Not set")
+        if value != "Not set":
+            # Redact sensitive information
+            value = value[:4] + "..." + value[-4:] if len(value) > 8 else "****"
+        logger.info(f"  {var}: {value}")
+    
+    # Print YAML file paths
+    yaml_paths = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'google-ads.yaml'),
+        "/app/src/data_ingestion/google_ads/google-ads.yaml",
+        "/app/google-ads.yaml",
+        os.path.join(os.getcwd(), "src/data_ingestion/google_ads/google-ads.yaml")
+    ]
+    logger.info("YAML file paths:")
+    for path in yaml_paths:
+        exists = os.path.exists(path)
+        logger.info(f"  {path}: {'Exists' if exists else 'Does not exist'}")
+        if exists:
+            try:
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    # Print keys in the YAML file (redact values)
+                    logger.info(f"    Keys in YAML file: {list(config.keys())}")
+                    # Print API version if present
+                    if 'api_version' in config:
+                        logger.info(f"    API version in YAML: {config['api_version']}")
+                    elif 'version' in config:
+                        logger.info(f"    API version in YAML: {config['version']}")
+            except Exception as e:
+                logger.error(f"    Error reading YAML file: {str(e)}")
+    
+    # Check if we can import the Google Ads client
+    logger.info("Checking Google Ads client imports:")
+    try:
+        from google.ads.googleads.client import GoogleAdsClient
+        logger.info("  Successfully imported GoogleAdsClient")
+        
+        # Try to import version-specific clients
+        versions = ["v11", "v14", "v16", "v18", "v21"]
+        for version in versions:
+            try:
+                if version == "v11":
+                    from google.ads.googleads.v11 import GoogleAdsClient as V11Client
+                    logger.info(f"  Successfully imported GoogleAdsClient for {version}")
+                elif version == "v14":
+                    from google.ads.googleads.v14 import GoogleAdsClient as V14Client
+                    logger.info(f"  Successfully imported GoogleAdsClient for {version}")
+                elif version == "v16":
+                    from google.ads.googleads.v16 import GoogleAdsClient as V16Client
+                    logger.info(f"  Successfully imported GoogleAdsClient for {version}")
+                elif version == "v18":
+                    from google.ads.googleads.v18 import GoogleAdsClient as V18Client
+                    logger.info(f"  Successfully imported GoogleAdsClient for {version}")
+                elif version == "v21":
+                    from google.ads.googleads.v21 import GoogleAdsClient as V21Client
+                    logger.info(f"  Successfully imported GoogleAdsClient for {version}")
+            except ImportError as e:
+                logger.warning(f"  Failed to import GoogleAdsClient for {version}: {str(e)}")
+    except ImportError as e:
+        logger.error(f"  Failed to import GoogleAdsClient: {str(e)}")
+    
+    # Check network connectivity to Google Ads API
+    logger.info("Checking network connectivity to Google Ads API:")
+    try:
+        import socket
+        socket.setdefaulttimeout(5)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("googleads.googleapis.com", 443))
+        logger.info("  Successfully connected to googleads.googleapis.com:443")
+    except Exception as e:
+        logger.error(f"  Failed to connect to googleads.googleapis.com:443: {str(e)}")
+    
+    # Try to get an access token
+    logger.info("Trying to get an access token:")
+    try:
+        # Get credentials from environment variables or YAML
+        client_id = GOOGLE_ADS_CLIENT_ID
+        client_secret = GOOGLE_ADS_CLIENT_SECRET
+        refresh_token = GOOGLE_ADS_REFRESH_TOKEN
+        
+        # Try to load from YAML if available
+        for path in yaml_paths:
+            if os.path.exists(path):
+                logger.info(f"  Loading credentials from YAML: {path}")
+                with open(path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    client_id = config.get('client_id', client_id)
+                    client_secret = config.get('client_secret', client_secret)
+                    refresh_token = config.get('refresh_token', refresh_token)
+                    break
+        
+        # Get access token
+        token_url = "https://accounts.google.com/o/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        logger.info("  Requesting OAuth2 access token...")
+        token_response = requests.post(token_url, data=token_data)
+        if token_response.status_code == 200:
+            logger.info("  Successfully obtained access token")
+            # Print token expiry
+            token_json = token_response.json()
+            if 'expires_in' in token_json:
+                logger.info(f"  Token expires in: {token_json['expires_in']} seconds")
+        else:
+            logger.error(f"  Failed to get access token: {token_response.status_code}")
+            logger.error(f"  Response: {token_response.text}")
+    except Exception as e:
+        logger.error(f"  Error getting access token: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+    
+    logger.info("Google Ads environment debugging complete")
+
 def main():
     """Main entry point for the Google Ads connector."""
     import argparse
@@ -1138,6 +2068,7 @@ def main():
     if args.run_once:
         logger.info("Running Google Ads ETL process once...")
         try:
+            debug_google_ads_environment()
             run_google_ads_etl(days=args.days)
             logger.info("ETL process completed successfully.")
         except Exception as e:
@@ -1151,6 +2082,7 @@ def main():
     
     # Run ETL process immediately
     try:
+        debug_google_ads_environment()
         run_google_ads_etl(days=args.days)
         logger.info("Initial ETL process completed successfully.")
     except Exception as e:
