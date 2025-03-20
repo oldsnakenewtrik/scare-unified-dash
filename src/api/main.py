@@ -44,10 +44,20 @@ except Exception as e:
 
 app = FastAPI(title="SCARE Unified Metrics API")
 
-# Configure CORS to allow any origin
+# Configure CORS to allow any origin - THIS IS CRITICAL FOR PRODUCTION
 print("Configuring CORS middleware with origins:", ["*"])
-origins = ["*"]
 
+# For production, allow all origins temporarily until we debug the issue
+origins = [
+    "*",  # Allow all origins for testing
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://front-production-f6e6.up.railway.app",
+    "https://scare-unified-dash-production.up.railway.app",
+]
+
+# Make sure CORS middleware is first in the list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -57,6 +67,27 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=3600,
 )
+
+# Custom middleware to ensure CORS headers are present on every response
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    try:
+        response = await call_next(request)
+        
+        # Add CORS headers if they're not already present
+        if "access-control-allow-origin" not in response.headers:
+            print(f"CORS headers not found for path: {request.url.path}. Adding them now.")
+            response.headers["access-control-allow-origin"] = "*"
+            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["access-control-allow-headers"] = "*"
+        
+        return response
+    except Exception as e:
+        print(f"Error in CORS middleware: {str(e)}")
+        # Continue even if there's an error
+        response = await call_next(request)
+        return response
+
 print("CORS middleware configured successfully")
 
 # Dependency
@@ -366,6 +397,22 @@ def health_check(db=Depends(get_db)):
 def health_check():
     """Health check endpoint"""
     return {"status": "ok", "cors": "enabled"}
+
+# Simple CORS test endpoint to verify headers
+@app.get("/cors-test")
+def test_cors():
+    """
+    Test endpoint to verify CORS configuration
+    Returns details about the CORS configuration to help with debugging
+    """
+    return {
+        "status": "ok",
+        "cors_enabled": True,
+        "origins_allowed": origins,
+        "middleware_configured": True,
+        "server_time": datetime.datetime.now().isoformat(),
+        "environment": os.environ.get("ENVIRONMENT", "unknown")
+    }
 
 # API endpoints
 @app.get("/api/metrics/summary", response_model=List[MetricsSummary])
@@ -1139,7 +1186,16 @@ def get_google_ads_campaigns(db=Depends(get_db)):
         logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Add /api/health endpoint to work with Railway health checks
+# Fallback OPTIONS handler for all routes
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """
+    Global OPTIONS handler to ensure CORS preflight requests are handled for all routes
+    This is a fallback in case FastAPI's built-in CORS handling fails
+    """
+    print(f"Handling OPTIONS request for path: /{path}")
+    return {"detail": "CORS preflight request handled"}
+
 @app.get("/api/health")
 def api_health_check():
     """
