@@ -1308,6 +1308,10 @@ def get_hierarchical_campaigns(db=Depends(get_db)):
             order_by_clause = "m.source_system, m.network, m.pretty_campaign_name"
             display_order_col = "0 as display_order,"
         
+        # Get current date range for the last 30 days
+        end_date = datetime.date.today()
+        start_date = end_date - datetime.timedelta(days=30)
+        
         query = f"""
             SELECT 
                 m.id,
@@ -1319,19 +1323,33 @@ def get_hierarchical_campaigns(db=Depends(get_db)):
                 m.campaign_type,
                 m.network,
                 {display_order_col}
-                0 as impressions,
-                0 as clicks,
-                0 as conversions,
-                0 as cost
+                COALESCE(SUM(p.impressions), 0) as impressions,
+                COALESCE(SUM(p.clicks), 0) as clicks,
+                COALESCE(SUM(p.conversions), 0) as conversions,
+                COALESCE(SUM(p.cost), 0) as cost
             FROM 
                 sm_campaign_name_mapping m
+            LEFT JOIN
+                sm_campaign_performance p 
+                ON p.campaign_id = m.external_campaign_id
+                AND p.date BETWEEN :start_date AND :end_date
             WHERE 
                 m.is_active = TRUE
+            GROUP BY
+                m.id,
+                m.source_system,
+                m.external_campaign_id,
+                m.original_campaign_name,
+                m.pretty_campaign_name,
+                m.campaign_category,
+                m.campaign_type,
+                m.network
+                {', m.display_order' if has_display_order else ''}
             ORDER BY 
                 {order_by_clause}
         """
         
-        result = db.execute(text(query)).fetchall()
+        result = db.execute(text(query), {"start_date": start_date, "end_date": end_date}).fetchall()
         
         # Convert to list of dictionaries
         return [dict(row._mapping) for row in result]
