@@ -133,7 +133,7 @@ function App() {
     try {
       // Fetch all campaign data using CORS proxy
       console.log('Fetching campaign metrics data...');
-      const response = await corsProxy.get('/api/campaigns/metrics');
+      const response = await corsProxy.get('/api/campaign-metrics');
       
       // Transform and store the data
       console.log('Campaign data received:', response.data.length, 'records');

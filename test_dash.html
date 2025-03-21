@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Ads Data Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #333;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .loading {
+            color: blue;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Ads Data Test</h1>
+    
+    <div>
+        <label for="start-date">Start Date:</label>
+        <input type="date" id="start-date" value="2024-01-01">
+        
+        <label for="end-date">End Date:</label>
+        <input type="date" id="end-date">
+        
+        <button id="fetch-data">Fetch Campaign Metrics</button>
+        <button id="fetch-all-data">Fetch All Metrics</button>
+    </div>
+    
+    <div id="status"></div>
+    <div id="results"></div>
+    
+    <script>
+        // Set today's date as the default end date
+        document.getElementById('end-date').valueAsDate = new Date();
+        
+        // Function to format numbers
+        function formatNumber(num) {
+            if (num === null || num === undefined) return 'N/A';
+            
+            if (typeof num === 'number') {
+                // Format as currency for cost
+                if (num >= 1000000) {
+                    return `$${(num / 1000000).toFixed(2)}M`;
+                } else if (num >= 1000) {
+                    return `$${(num / 1000).toFixed(2)}K`;
+                } else {
+                    return `$${num.toFixed(2)}`;
+                }
+            }
+            
+            return num.toString();
+        }
+        
+        // Function to format percentages
+        function formatPercent(num) {
+            if (num === null || num === undefined) return 'N/A';
+            
+            if (typeof num === 'number') {
+                return `${(num * 100).toFixed(2)}%`;
+            }
+            
+            return num.toString();
+        }
+        
+        // Function to create a table from data
+        function createTable(data) {
+            if (!data || data.length === 0) {
+                return '<p>No data available</p>';
+            }
+            
+            // Get the keys from the first object to use as table headers
+            const keys = Object.keys(data[0]);
+            
+            let table = '<table>';
+            
+            // Create table header
+            table += '<thead><tr>';
+            keys.forEach(key => {
+                // Format header title with spaces
+                const formattedHeader = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                table += `<th>${formattedHeader}</th>`;
+            });
+            table += '</tr></thead>';
+            
+            // Create table body
+            table += '<tbody>';
+            data.forEach(item => {
+                table += '<tr>';
+                keys.forEach(key => {
+                    let value = item[key];
+                    
+                    // Format numbers appropriately
+                    if (key === 'cost' || key === 'cost_per_conversion') {
+                        value = formatNumber(value);
+                    } else if (key === 'ctr' || key === 'conversion_rate') {
+                        value = formatPercent(value);
+                    } else if (key === 'impressions' || key === 'clicks' || key === 'conversions') {
+                        value = typeof value === 'number' ? value.toLocaleString() : value;
+                    }
+                    
+                    table += `<td>${value}</td>`;
+                });
+                table += '</tr>';
+            });
+            table += '</tbody>';
+            
+            table += '</table>';
+            return table;
+        }
+        
+        // Function to fetch data from the API
+        async function fetchCampaignMetrics(startDate, endDate) {
+            const statusElement = document.getElementById('status');
+            const resultsElement = document.getElementById('results');
+            
+            statusElement.innerHTML = '<p class="loading">Loading data...</p>';
+            resultsElement.innerHTML = '';
+            
+            try {
+                // Construct the API URL with query parameters
+                const apiUrl = `https://scare-unified-dash-production.up.railway.app/api/campaign-metrics?start_date=${startDate}&end_date=${endDate}`;
+                
+                console.log(`Fetching data from: ${apiUrl}`);
+                statusElement.innerHTML += `<p>Fetching data from: ${apiUrl}</p>`;
+                
+                // Make the API request
+                const response = await fetch(apiUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Data received:', data);
+                
+                // Display the data
+                statusElement.innerHTML = `<p>Retrieved ${data.length} campaign metrics records.</p>`;
+                resultsElement.innerHTML = createTable(data);
+                
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                statusElement.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+                
+                // Try the other endpoint as a fallback
+                try {
+                    const fallbackUrl = `https://scare-unified-dash-production.up.railway.app/api/campaigns/metrics?start_date=${startDate}&end_date=${endDate}`;
+                    statusElement.innerHTML += `<p>Trying fallback URL: ${fallbackUrl}</p>`;
+                    
+                    const fallbackResponse = await fetch(fallbackUrl);
+                    
+                    if (!fallbackResponse.ok) {
+                        throw new Error(`HTTP error! Status: ${fallbackResponse.status}`);
+                    }
+                    
+                    const fallbackData = await fallbackResponse.json();
+                    console.log('Fallback data received:', fallbackData);
+                    
+                    statusElement.innerHTML += `<p>Retrieved ${fallbackData.length} campaign metrics records from fallback URL.</p>`;
+                    resultsElement.innerHTML = createTable(fallbackData);
+                    
+                } catch (fallbackError) {
+                    console.error('Error fetching fallback data:', fallbackError);
+                    statusElement.innerHTML += `<p class="error">Fallback Error: ${fallbackError.message}</p>`;
+                }
+            }
+        }
+        
+        // Set up event listeners
+        document.getElementById('fetch-data').addEventListener('click', () => {
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            fetchCampaignMetrics(startDate, endDate);
+        });
+        
+        document.getElementById('fetch-all-data').addEventListener('click', () => {
+            // Fetch all data for the last year
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDate = new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0];
+            fetchCampaignMetrics(startDate, endDate);
+        });
+    </script>
+</body>
+</html>
