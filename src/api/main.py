@@ -233,17 +233,27 @@ except ImportError as e:
 
 # Database connection
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
+
+# Global variable to track if DB monitor was initialized
+db_monitor_initialized = False
+
 try:
     # Use the new retry mechanism for establishing the database connection
+    logger.info("Attempting to connect to database with retry mechanism")
     engine = connect_with_retry(max_retries=5, delay=5)
     
     # Initialize the database monitor
-    db_monitor = initialize_monitor(
-        database_url=DATABASE_URL,
-        check_interval=60,  # Check every minute in production
-        pool_recycle=300    # Recycle connections every 5 minutes
-    )
-    logger.info("Database monitoring initialized and started")
+    try:
+        db_monitor = initialize_monitor(
+            database_url=DATABASE_URL,
+            check_interval=60,  # Check every minute in production
+            pool_recycle=300    # Recycle connections every 5 minutes
+        )
+        db_monitor_initialized = True
+        logger.info("Database monitoring initialized and started")
+    except Exception as e:
+        logger.error(f"Failed to initialize database monitor: {str(e)}")
+        logger.warning("Application will continue without database monitoring")
     
     # Add a global on_startup handler to verify DB connection when app starts
     @app.on_event("startup")
@@ -348,13 +358,21 @@ async def db_error_handler(request, call_next):
             request.url.path.endswith("/api/db-status"),
             request.url.path.endswith("/api/db-reconnect"),
             request.url.path.endswith("/health"),
-            request.url.path.endswith("/api/health")
+            request.url.path.endswith("/api/health"),
+            request.url.path.endswith("/api/cors-test")  
         ])
         
         if skip_db_error_check:
             # Skip DB checking for diagnostics endpoints
             return await call_next(request)
         
+        # Check if database monitor is initialized
+        if not db_monitor_initialized:
+            # If monitor isn't initialized, allow the request to proceed
+            # but log a warning for non-diagnostic endpoints
+            logger.warning(f"Database monitor not initialized for request to {request.url.path}")
+            return await call_next(request)
+            
         # Check if database is connected
         db_status = get_db_status()
         if not db_status.get("is_connected", False):
@@ -860,6 +878,19 @@ def test_db_connection():
     try:
         start_time = time.time()
         
+        # Check if database monitor is initialized
+        if not db_monitor_initialized:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "status": "error",
+                    "message": "Database monitor is not initialized",
+                    "monitor_initialized": False,
+                    "test_time": time.time() - start_time,
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
+            )
+            
         # Get monitoring status
         monitor_status = get_db_status()
         
@@ -935,6 +966,17 @@ def test_db_connection():
 def get_database_status():
     """Get the current database connection status"""
     try:
+        # Check if database monitor is initialized
+        if not db_monitor_initialized:
+            return {
+                "status": "not_initialized",
+                "message": "Database monitor has not been initialized",
+                "is_connected": False,
+                "database_url": DATABASE_URL.split("@")[1].split("/")[0] if "@" in DATABASE_URL else "unknown",
+                "railway_private_networking": "railway.internal" in DATABASE_URL,
+                "request_time": datetime.datetime.now().isoformat()
+            }
+            
         # Get the status from the database monitor
         status = get_db_status()
         
@@ -966,6 +1008,17 @@ def get_database_status():
 def reconnect_database():
     """Force a database reconnection"""
     try:
+        # Check if database monitor is initialized
+        if not db_monitor_initialized:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "status": "error",
+                    "message": "Database monitor is not initialized, cannot reconnect",
+                    "success": False
+                }
+            )
+        
         # Log the reconnection attempt
         logger.info("Manual database reconnection requested")
         
