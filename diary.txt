@@ -130,6 +130,37 @@ The specific errors were:
 - Test the CORS and WebSocket connections in the production environment
 - Monitor the application logs to ensure the errors don't occur again
 
+### March 21, 2025 (Update): Fixed Port Configuration Issue in Railway
+
+#### Problem:
+After deploying the CORS and WebSocket fixes, the application was still experiencing "Bad Gateway" errors when accessing the backend. The Railway logs showed the application was starting successfully, but requests to the backend were failing with 502 errors.
+
+#### Investigation:
+1. The Railway settings showed the backend was configured to use port 5000
+2. The application was actually running on port 8000 (default in docker_entrypoint.sh)
+3. This port mismatch was causing the "Bad Gateway" errors
+
+#### Solution:
+1. **Port Configuration Fix**:
+   - Updated the default port in docker_entrypoint.sh from 8000 to 5000 to match Railway settings
+   - Ensured the main.py file also uses the PORT environment variable with a fallback to 5000
+   - Moved the catch-all route handler to the end of the file to avoid conflicts with API routes
+
+2. **CORS Configuration Update**:
+   - Reverted to using wildcard origins temporarily to ensure maximum compatibility
+   - Disabled allow_credentials since it can't be used with wildcard origins
+   - Added more logging to help diagnose any remaining issues
+
+#### Implementation Details:
+- The docker_entrypoint.sh now uses port 5000 as the default
+- The main.py file has been updated to use the PORT environment variable
+- The catch-all route handler is now the last route to avoid conflicts
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Test the backend endpoints to ensure they're accessible
+- Once confirmed working, consider switching back to specific origins for better security
+
 ## Current Status (March 2025)
 We have successfully completed the database schema design and Google Ads integration. We've verified that we can fetch real campaign data from Google Ads API and store it properly in our database. The two-step ETL process provides resilience against connectivity issues, which is particularly important for Railway deployment.
 

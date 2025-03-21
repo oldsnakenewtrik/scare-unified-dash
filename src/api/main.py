@@ -112,18 +112,18 @@ else:
 
 app = FastAPI(title="SCARE Unified Metrics API")
 
-# Define allowed origins - include the specific frontend URL
-origins = [
-    "https://front-production-f6e6.up.railway.app",  # Production frontend
-    "http://localhost:3000",  # Local development frontend
-    "http://127.0.0.1:3000"   # Alternative local frontend
-]
+print("=====================================================")
+print("INITIALIZING FASTAPI APP")
+print("=====================================================")
+
+# Define allowed origins - allow all origins for testing
+origins = ["*"]  # Allow all origins for testing
 
 # Add CORS middleware directly to the main app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,  # Allow credentials since we're using specific origins
+    allow_credentials=False,  # Cannot use credentials with wildcard origins
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -1430,12 +1430,6 @@ def api_health_check():
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src", "frontend", "build")
 app.mount("/static", StaticFiles(directory=os.path.join(frontend_path, "static")), name="static")
 
-@app.get("/{path:path}")
-async def catch_all_routes(path: str):
-    if path.startswith("api/"):
-        raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse(os.path.join(frontend_path, "index.html"))
-
 @app.get("/api/test-cors", tags=["Diagnostics"])
 async def test_cors_detailed(request: Request):
     """
@@ -1459,6 +1453,15 @@ async def test_cors_detailed(request: Request):
         "timestamp": datetime.datetime.now().isoformat()
     }
 
+# This must be the last route to avoid conflicts with API routes
+@app.get("/{path:path}")
+async def catch_all_routes(path: str):
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+    return FileResponse(os.path.join(frontend_path, "index.html"))
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    # Use port 5000 to match Railway configuration
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
