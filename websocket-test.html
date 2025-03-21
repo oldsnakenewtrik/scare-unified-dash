@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        input {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Test Tool</h1>
+    <p>This tool tests WebSocket connections for the SCARE Unified Dashboard.</p>
+    
+    <div>
+        <label for="environment">Environment:</label>
+        <select id="environment" onchange="updateWsUrl()">
+            <option value="local">Local</option>
+            <option value="production">Production</option>
+        </select>
+    </div>
+    
+    <div>
+        <label for="wsUrl">WebSocket URL:</label>
+        <input type="text" id="wsUrl" value="ws://localhost:5001/ws" style="width: 400px;">
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
+        <button id="pingBtn" disabled>Send Ping</button>
+        <button id="clearBtn">Clear Results</button>
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <label for="messageInput">Message:</label>
+        <input type="text" id="messageInput" placeholder="Type a message..." style="width: 300px;">
+        <button id="sendBtn" disabled>Send</button>
+    </div>
+    
+    <div id="status" style="margin-top: 20px; font-weight: bold;">Status: Disconnected</div>
+    
+    <div id="results"></div>
+    
+    <script>
+        let socket = null;
+        
+        function addResult(title, content, isError = false) {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'result';
+            
+            const titleEl = document.createElement('h3');
+            titleEl.className = isError ? 'error' : 'success';
+            titleEl.textContent = title;
+            
+            const contentEl = document.createElement('pre');
+            contentEl.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            
+            resultDiv.appendChild(titleEl);
+            resultDiv.appendChild(contentEl);
+            resultsDiv.prepend(resultDiv);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        function updateStatus(status, isConnected = false) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Status: ${status}`;
+            statusEl.style.color = isConnected ? 'green' : 'red';
+            
+            document.getElementById('connectBtn').disabled = isConnected;
+            document.getElementById('disconnectBtn').disabled = !isConnected;
+            document.getElementById('pingBtn').disabled = !isConnected;
+            document.getElementById('sendBtn').disabled = !isConnected;
+        }
+        
+        function updateWsUrl() {
+            const environment = document.getElementById('environment').value;
+            const wsUrlInput = document.getElementById('wsUrl');
+            
+            if (environment === 'local') {
+                wsUrlInput.value = 'ws://localhost:5001/ws';
+            } else if (environment === 'production') {
+                wsUrlInput.value = 'wss://scare-unified-dash-production.up.railway.app/ws';
+            }
+        }
+        
+        function connect() {
+            const wsUrl = document.getElementById('wsUrl').value;
+            
+            try {
+                socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function(event) {
+                    updateStatus('Connected', true);
+                    addResult('Connection Established', 'WebSocket connection established successfully');
+                };
+                
+                socket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        addResult(`Message Received (${data.type || 'unknown'})`, data);
+                    } catch (e) {
+                        addResult('Message Received (raw)', event.data);
+                    }
+                };
+                
+                socket.onclose = function(event) {
+                    updateStatus('Disconnected');
+                    addResult('Connection Closed', {
+                        code: event.code,
+                        reason: event.reason,
+                        wasClean: event.wasClean
+                    }, !event.wasClean);
+                    socket = null;
+                };
+                
+                socket.onerror = function(error) {
+                    updateStatus('Error');
+                    addResult('WebSocket Error', error.toString(), true);
+                };
+            } catch (error) {
+                updateStatus('Error');
+                addResult('Connection Error', error.toString(), true);
+            }
+        }
+        
+        function disconnect() {
+            if (socket) {
+                socket.close(1000, "User disconnected");
+            }
+        }
+        
+        function sendPing() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const pingMessage = {
+                    type: 'ping',
+                    timestamp: new Date().toISOString()
+                };
+                
+                socket.send(JSON.stringify(pingMessage));
+                addResult('Ping Sent', pingMessage);
+            } else {
+                addResult('Cannot Send Ping', 'WebSocket is not connected', true);
+            }
+        }
+        
+        function sendMessage() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const messageInput = document.getElementById('messageInput');
+                const message = messageInput.value.trim();
+                
+                if (message) {
+                    const messageObj = {
+                        type: 'message',
+                        content: message,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    socket.send(JSON.stringify(messageObj));
+                    addResult('Message Sent', messageObj);
+                    messageInput.value = '';
+                }
+            } else {
+                addResult('Cannot Send Message', 'WebSocket is not connected', true);
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('connectBtn').addEventListener('click', connect);
+        document.getElementById('disconnectBtn').addEventListener('click', disconnect);
+        document.getElementById('pingBtn').addEventListener('click', sendPing);
+        document.getElementById('clearBtn').addEventListener('click', clearResults);
+        document.getElementById('sendBtn').addEventListener('click', sendMessage);
+        
+        // Allow sending message with Enter key
+        document.getElementById('messageInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

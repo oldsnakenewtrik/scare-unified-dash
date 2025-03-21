@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>CORS Test Tool</h1>
+    <p>This tool tests CORS configuration for the SCARE Unified Dashboard API.</p>
+    
+    <div>
+        <label for="environment">Environment:</label>
+        <select id="environment" onchange="updateApiUrl()">
+            <option value="local">Local</option>
+            <option value="production">Production</option>
+        </select>
+    </div>
+    
+    <div>
+        <label for="apiUrl">API URL:</label>
+        <input type="text" id="apiUrl" value="http://localhost:5001/api/cors-test" style="width: 400px;">
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <button onclick="testCORS()">Test CORS</button>
+        <button onclick="testOptions()">Test OPTIONS</button>
+        <button onclick="clearResults()">Clear Results</button>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        function addResult(title, content, isError = false) {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'result';
+            
+            const titleEl = document.createElement('h3');
+            titleEl.className = isError ? 'error' : 'success';
+            titleEl.textContent = title;
+            
+            const contentEl = document.createElement('pre');
+            contentEl.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            
+            resultDiv.appendChild(titleEl);
+            resultDiv.appendChild(contentEl);
+            resultsDiv.appendChild(resultDiv);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        async function testCORS() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                // Get response headers
+                const headers = {};
+                response.headers.forEach((value, key) => {
+                    headers[key] = value;
+                });
+                
+                addResult('CORS Test Successful', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: headers,
+                    data: data
+                });
+            } catch (error) {
+                addResult('CORS Test Failed', error.toString(), true);
+            }
+        }
+        
+        async function testOptions() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Access-Control-Request-Method': 'GET',
+                        'Access-Control-Request-Headers': 'Content-Type',
+                        'Origin': window.location.origin
+                    }
+                });
+                
+                // Get response headers
+                const headers = {};
+                response.headers.forEach((value, key) => {
+                    headers[key] = value;
+                });
+                
+                addResult('OPTIONS Test Successful', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: headers
+                });
+            } catch (error) {
+                addResult('OPTIONS Test Failed', error.toString(), true);
+            }
+        }
+        
+        // Update API URL based on selected environment
+        function updateApiUrl() {
+            const environment = document.getElementById('environment').value;
+            const apiUrlInput = document.getElementById('apiUrl');
+            
+            if (environment === 'local') {
+                apiUrlInput.value = 'http://localhost:5001/api/cors-test';
+            } else if (environment === 'production') {
+                apiUrlInput.value = 'https://scare-unified-dash-production.up.railway.app/api/cors-test';
+            }
+        }
+    </script>
+</body>
+</html>

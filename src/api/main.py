@@ -22,26 +22,37 @@ load_dotenv()
 
 # Database connection
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+try:
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+    print(f"Database connection established: {DATABASE_URL}")
+except Exception as e:
+    print(f"Warning: Failed to connect to database: {str(e)}")
+    print("Application will continue to start, but database features will not work")
+    engine = None
+    SessionLocal = None
+    Base = declarative_base()
 
 # Run database initialization (creates tables and runs migrations)
-try:
-    # Use the correct import path for db_init
-    from src.api.db_init import init_database
-    init_database()
-except ImportError:
+if engine is not None:
     try:
-        # Fallback to local import if the package structure isn't recognized
-        from db_init import init_database
+        # Use the correct import path for db_init
+        from src.api.db_init import init_database
         init_database()
+    except ImportError:
+        try:
+            # Fallback to local import if the package structure isn't recognized
+            from db_init import init_database
+            init_database()
+        except Exception as e:
+            print(f"Warning: Failed to initialize database: {str(e)}")
+            print("Application will continue to start, but some features may not work correctly")
     except Exception as e:
         print(f"Warning: Failed to initialize database: {str(e)}")
         print("Application will continue to start, but some features may not work correctly")
-except Exception as e:
-    print(f"Warning: Failed to initialize database: {str(e)}")
-    print("Application will continue to start, but some features may not work correctly")
+else:
+    print("Skipping database initialization as database connection failed")
 
 app = FastAPI(title="SCARE Unified Metrics API")
 
@@ -109,8 +120,18 @@ async def add_cors_headers(request, call_next):
 
 print("CORS middleware configured successfully")
 
+# Add WebSocket support
+try:
+    from src.api.websocket import add_websocket_endpoints
+    app = add_websocket_endpoints(app)
+    print("WebSocket support added successfully")
+except ImportError as e:
+    print(f"Failed to add WebSocket support: {e}")
+
 # Dependency
 def get_db():
+    if SessionLocal is None:
+        raise HTTPException(status_code=503, detail="Database connection not available")
     db = SessionLocal()
     try:
         yield db

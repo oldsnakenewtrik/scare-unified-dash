@@ -13,7 +13,7 @@ const getApiBaseUrl = () => {
   }
   
   // For local development or other environments, use the environment variable or default
-  return process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+  return process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 };
 
 const API_BASE_URL = getApiBaseUrl();
