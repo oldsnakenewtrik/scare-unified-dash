@@ -760,53 +760,104 @@ def campaigns_metrics_options():
     """Handle OPTIONS preflight request for the campaigns/metrics endpoint"""
     return {"detail": "CORS preflight request handled"}
 
-@app.get("/api/campaigns/metrics", response_model=List[CampaignMetrics])
+@app.get("/api/campaigns/metrics", response_model=List[Dict])
 def get_campaigns_metrics(db=Depends(get_db)):
     """
     Get all campaign metrics for the master tab view.
+    Respects the campaign mapping infrastructure to unify metrics across data sources.
     """
     try:
-        # First try to get data from the database
-        query = text("""
+        # First get all active mappings to ensure we include all configured campaigns
+        mapping_query = text("""
             SELECT 
-                dc.campaign_id,
-                dc.campaign_name,
-                dc.source_system,
-                dc.is_active,
-                um.date,
-                um.impressions,
-                um.clicks,
-                um.cost,
-                um.conversions,
-                um.revenue,
-                um.cpc,
-                COALESCE(sl.smooth_leads, 0) as smooth_leads,
-                COALESCE(ts.total_sales, 0) as total_sales
-            FROM scare_metrics.dim_campaign dc
-            LEFT JOIN scare_metrics.unified_metrics_view um ON dc.campaign_id = um.campaign_id
-            LEFT JOIN (
-                SELECT campaign_id, SUM(leads) as smooth_leads
-                FROM scare_metrics.fact_leads
-                GROUP BY campaign_id
-            ) sl ON dc.campaign_id = sl.campaign_id
-            LEFT JOIN (
-                SELECT campaign_id, COUNT(*) as total_sales
-                FROM scare_metrics.fact_sales
-                GROUP BY campaign_id
-            ) ts ON dc.campaign_id = ts.campaign_id
+                id,
+                source_system,
+                external_campaign_id,
+                pretty_campaign_name,
+                pretty_network,
+                pretty_source,
+                campaign_category,
+                campaign_type,
+                network,
+                is_active
+            FROM public.sm_campaign_name_mapping
+            WHERE is_active = TRUE
+            ORDER BY display_order, pretty_campaign_name
         """)
         
-        print("Executing campaign metrics query...")
-        result = db.execute(query)
-        campaigns = [dict(row._mapping) for row in result]
-        print(f"Found {len(campaigns)} campaigns in metrics query")
+        print("Fetching campaign mappings...")
+        mappings = {
+            # Use tuple of (source_system, external_campaign_id) as key
+            (row.source_system, row.external_campaign_id): dict(row._mapping)
+            for row in db.execute(mapping_query)
+        }
         
-        if not campaigns:
-            print("No campaigns found, returning empty list")
+        print(f"Found {len(mappings)} active campaign mappings")
+        
+        # Now query Google Ads metrics (currently the only source with data)
+        metrics_query = text("""
+            SELECT 
+                campaign_id,
+                campaign_name,
+                date,
+                impressions,
+                clicks,
+                cost,
+                conversions
+            FROM public.sm_fact_google_ads
+            ORDER BY date DESC
+        """)
+        
+        print("Fetching Google Ads metrics...")
+        google_metrics = {}
+        for row in db.execute(metrics_query):
+            campaign_id = row.campaign_id
+            if campaign_id not in google_metrics:
+                google_metrics[campaign_id] = dict(row._mapping)
+        
+        print(f"Found metrics for {len(google_metrics)} Google Ads campaigns")
+        
+        # Combine mapping data with metrics
+        results = []
+        for (source, campaign_id), mapping in mappings.items():
+            metrics = None
+            
+            if source == 'Google Ads' and campaign_id in google_metrics:
+                metrics = google_metrics[campaign_id]
+            
+            if metrics:
+                # Build a combined result with both mapping and metrics data
+                result = {
+                    'mapping_id': mapping['id'],
+                    'campaign_id': campaign_id,
+                    'campaign_name': mapping['pretty_campaign_name'],
+                    'source_system': source,
+                    'pretty_source': mapping['pretty_source'],
+                    'pretty_network': mapping['pretty_network'],
+                    'is_active': mapping['is_active'],
+                    'date': metrics.get('date'),
+                    'impressions': metrics.get('impressions', 0),
+                    'clicks': metrics.get('clicks', 0),
+                    'spend': metrics.get('cost', 0.0),  # Rename cost to spend for model compatibility
+                    'conversions': metrics.get('conversions', 0),
+                    'revenue': 0.0,  # Not available for Google Ads
+                    'cpc': metrics.get('clicks', 0) and (metrics.get('cost', 0) / metrics.get('clicks', 0)) or 0,
+                    'smooth_leads': 0,  # Not available yet
+                    'total_sales': 0,   # Not available yet
+                    'users': 0,         # Not available yet
+                }
+                results.append(result)
+        
+        print(f"Returning {len(results)} combined campaign metrics results")
+        
+        if not results:
+            print("No campaigns found with metrics, returning empty list")
             return []
         
-        return campaigns
+        return results
     except Exception as e:
+        print(f"Error in campaign metrics: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @app.get("/api/campaign-metrics")
