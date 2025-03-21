@@ -5,7 +5,9 @@ Creates all required tables if they don't exist and runs necessary migrations.
 import logging
 import sys
 import os
+import time
 from sqlalchemy import create_engine, text, inspect
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from dotenv import load_dotenv
 
 # Configure logging
@@ -24,51 +26,80 @@ load_dotenv()
 # Get database URL from environment - add more fallbacks
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_DATABASE_URL") or "postgresql://scare_user:scare_password@postgres:5432/scare_metrics"
 
+def connect_with_retry(max_retries=5, delay=5):
+    """Attempt to connect to the database with retries"""
+    for attempt in range(max_retries):
+        try:
+            # Print database URL for debugging (masking password)
+            debug_url = DATABASE_URL
+            if "://" in debug_url:
+                parts = debug_url.split("://")
+                if "@" in parts[1]:
+                    userpass, hostdb = parts[1].split("@", 1)
+                    if ":" in userpass:
+                        user, password = userpass.split(":", 1)
+                        debug_url = f"{parts[0]}://{user}:****@{hostdb}"
+            
+            logger.info(f"Connecting to database (attempt {attempt+1}/{max_retries}): {debug_url}")
+            
+            # Connect to database
+            engine = create_engine(DATABASE_URL)
+            conn = engine.connect()
+            logger.info(f"Database connection established successfully after {attempt+1} attempt(s)")
+            return engine, conn
+        except OperationalError as e:
+            logger.warning(f"Database connection attempt {attempt+1} failed: {e}")
+            if "Network is unreachable" in str(e):
+                logger.warning("Network connectivity issue detected. Checking if using internal Railway networking.")
+                if "railway.internal" in DATABASE_URL:
+                    logger.warning("Using Railway internal networking. Please ensure Private Networking is enabled for this service.")
+            
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Failed to connect to database after {max_retries} attempts")
+                raise
+
 def init_database():
     """Initialize the database with required tables and run migrations"""
     try:
-        # Print database URL for debugging (masking password)
-        debug_url = DATABASE_URL
-        if "://" in debug_url:
-            parts = debug_url.split("://")
-            if "@" in parts[1]:
-                userpass, hostdb = parts[1].split("@", 1)
-                if ":" in userpass:
-                    user, password = userpass.split(":", 1)
-                    debug_url = f"{parts[0]}://{user}:****@{hostdb}"
+        # Connect to database with retry mechanism
+        try:
+            engine, conn = connect_with_retry()
+        except Exception as e:
+            logger.error(f"Error initializing database: {e}")
+            logger.warning("Application will continue to start, but some features may not work correctly")
+            return False
+            
+        # Create required tables if they don't exist
+        create_tables_if_not_exist(conn)
         
-        logger.info(f"Connecting to database: {debug_url}")
+        # Add display_order column
+        add_display_order_column(conn)
         
-        # Connect to database
-        engine = create_engine(DATABASE_URL)
+        # Add unique constraint
+        add_unique_constraint(conn)
         
-        with engine.connect() as conn:
-            # Create required tables if they don't exist
-            create_tables_if_not_exist(conn)
-            
-            # Add display_order column
-            add_display_order_column(conn)
-            
-            # Add unique constraint (don't remove it) 
-            add_unique_constraint(conn)
-            
-            # Add pretty name columns
-            add_pretty_name_columns(conn)
-            
-            # Add network column to all fact tables
-            add_network_column(conn)
-            
-            # Create or update views
-            create_or_update_views(conn)
-            
-            # Insert sample data - DISABLED TO AVOID CONFUSION WITH REAL DATA
-            # insert_sample_data(conn)
-            
-        logger.info("Database initialization completed successfully")
+        # Add pretty_name columns
+        add_pretty_name_columns(conn)
         
+        # Add network column to fact tables
+        add_network_column(conn)
+        
+        # Create views
+        create_or_update_views(conn)
+        
+        # Insert sample data if tables are empty
+        if os.getenv("INSERT_SAMPLE_DATA", "false").lower() == "true":
+            insert_sample_data(conn)
+        
+        conn.close()
+        return True
     except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
-        raise
+        logger.error(f"Error initializing database: {e}")
+        logger.warning("Application will continue to start, but some features may not work correctly")
+        return False
 
 def create_tables_if_not_exist(conn):
     """Create all required tables if they don't exist"""

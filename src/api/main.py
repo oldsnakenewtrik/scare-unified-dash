@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -19,108 +20,26 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 import asyncio
 import aiohttp
+from sqlalchemy import inspect
+
+# Import the database initialization module
+from db_init import init_database, connect_with_retry
+# Import the database monitoring module
+from db_monitor import initialize_monitor, get_db_status, force_db_reconnect
 
 # Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-# Function to run database migrations
-def run_migrations(engine):
-    """Run database migrations during application startup"""
-    try:
-        logger.info("Checking for database migrations to apply")
-        
-        # Create migrations table if it doesn't exist
-        with engine.connect() as conn:
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS public.migrations (
-                id SERIAL PRIMARY KEY,
-                migration_name VARCHAR(255) NOT NULL UNIQUE,
-                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """))
-            
-            # Get list of applied migrations
-            result = conn.execute(text("SELECT migration_name FROM public.migrations"))
-            applied_migrations = [row[0] for row in result]
-            
-            # Get list of migration files
-            migrations_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "migrations")
-            if os.path.exists(migrations_dir):
-                migration_files = sorted([f for f in os.listdir(migrations_dir) if f.endswith('.sql')])
-                
-                # Apply migrations that haven't been applied yet
-                for migration_file in migration_files:
-                    if migration_file not in applied_migrations:
-                        logger.info(f"Applying migration: {migration_file}")
-                        
-                        # Read the migration file
-                        with open(os.path.join(migrations_dir, migration_file), 'r') as f:
-                            migration_sql = f.read()
-                        
-                        # Execute the migration in a transaction
-                        with conn.begin():
-                            conn.execute(text(migration_sql))
-                            
-                            # Record the migration as applied
-                            conn.execute(
-                                text("INSERT INTO public.migrations (migration_name) VALUES (:name)"),
-                                {"name": migration_file}
-                            )
-                        
-                        logger.info(f"Successfully applied migration: {migration_file}")
-            else:
-                logger.warning(f"Migrations directory not found: {migrations_dir}")
-    except Exception as e:
-        logger.error(f"Error applying migrations: {str(e)}")
-        # Don't raise the exception - we want the app to start even if migrations fail
-        # This allows manual intervention if needed
-
-# Database connection
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
-try:
-    engine = create_engine(DATABASE_URL)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base = declarative_base()
-    print(f"Database connection established: {DATABASE_URL}")
-except Exception as e:
-    print(f"Warning: Failed to connect to database: {str(e)}")
-    print("Application will continue to start, but database features will not work")
-    engine = None
-    SessionLocal = None
-    Base = declarative_base()
-
-# Run migrations during startup
-if engine is not None:
-    run_migrations(engine)
-
-# Run database initialization (creates tables and runs migrations)
-if engine is not None:
-    try:
-        # Use the correct import path for db_init
-        from src.api.db_init import init_database
-        init_database()
-    except ImportError:
-        try:
-            # Fallback to local import if the package structure isn't recognized
-            from db_init import init_database
-            init_database()
-        except Exception as e:
-            print(f"Warning: Failed to initialize database: {str(e)}")
-            print("Application will continue to start, but some features may not work correctly")
-    except Exception as e:
-        print(f"Warning: Failed to initialize database: {str(e)}")
-        print("Application will continue to start, but some features may not work correctly")
-else:
-    print("Skipping database initialization as database connection failed")
-
+# Set up the FastAPI application
 app = FastAPI(title="SCARE Unified Metrics API")
-
-print("=====================================================")
-print("INITIALIZING FASTAPI APP")
-print("=====================================================")
 
 # Define allowed origins - allow specific domains and Railway frontend
 origins = [
@@ -312,15 +231,169 @@ except ImportError as e:
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
 
+# Database connection
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
+try:
+    # Use the new retry mechanism for establishing the database connection
+    engine = connect_with_retry(max_retries=5, delay=5)
+    
+    # Initialize the database monitor
+    db_monitor = initialize_monitor(
+        database_url=DATABASE_URL,
+        check_interval=60,  # Check every minute in production
+        pool_recycle=300    # Recycle connections every 5 minutes
+    )
+    logger.info("Database monitoring initialized and started")
+    
+    # Add a global on_startup handler to verify DB connection when app starts
+    @app.on_event("startup")
+    def startup_db_client():
+        logger.info("FastAPI startup: Checking database connection")
+        try:
+            # Log the status
+            status = get_db_status()
+            if status["is_connected"]:
+                logger.info(f"Database connection successful at startup")
+            else:
+                logger.warning(f"Database not connected at startup: {status.get('last_error', 'Unknown error')}")
+                # Try to force a reconnect
+                reconnect_result = force_db_reconnect()
+                logger.info(f"Forced reconnection result: {reconnect_result}")
+        except Exception as e:
+            logger.error(f"Error during startup database check: {str(e)}")
+    
+    # Add a global on_shutdown handler to shutdown the DB connection when app stops
+    @app.on_event("shutdown")
+    def shutdown_db_client():
+        logger.info("FastAPI shutdown: Closing database connections")
+        try:
+            if engine:
+                engine.dispose()
+            logger.info("Database connections closed")
+        except Exception as e:
+            logger.error(f"Error closing database connections: {str(e)}")
+    
+    # Set up the session factory
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    # Initialize database at startup
+    try:
+        init_database(engine)
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+except Exception as e:
+    logger.critical(f"Failed to connect to database: {str(e)}")
+    # Note: We don't want to crash the server here, so we'll continue
+    # The database connection will be retried in the connect_with_retry function
+
 # Dependency
 def get_db():
     if SessionLocal is None:
-        raise HTTPException(status_code=503, detail="Database connection not available")
-    db = SessionLocal()
+        # We hit this case when database connection could not be established initially
+        # Generate a unique error ID for tracking
+        error_id = str(uuid.uuid4())
+        logger.error(f"Database connection unavailable. Error ID: {error_id}")
+        # Try to reconnect to the database
+        try:
+            logger.info("Attempting to reconnect to database...")
+            force_db_reconnect()
+            # If successful, this should update the global SessionLocal
+        except Exception as reconnect_error:
+            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
+        
+        # Still raise an exception to inform the client
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database unavailable. Error ID: {error_id}"
+        )
+    
+    db = None
     try:
+        db = SessionLocal()
         yield db
+    except OperationalError as e:
+        # Handle database connection errors
+        logger.error(f"Database session error: {str(e)}")
+        error_id = str(uuid.uuid4())
+        logger.error(f"Error ID: {error_id}")
+        
+        # Try to reconnect
+        try:
+            logger.info("Attempting to reconnect to database...")
+            force_db_reconnect()
+        except Exception as reconnect_error:
+            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database connection error. Error ID: {error_id}"
+        )
+    except Exception as e:
+        # Handle other database errors
+        logger.error(f"Database session exception: {str(e)}")
+        raise
     finally:
-        db.close()
+        if db:
+            db.close()
+
+# Add error handling middleware
+@app.middleware("http")
+async def db_error_handler(request, call_next):
+    """Middleware to handle database errors globally"""
+    try:
+        # Check for certain endpoints that should skip this middleware
+        skip_db_error_check = any([
+            request.url.path.endswith("/api/db-test"),
+            request.url.path.endswith("/api/db-status"),
+            request.url.path.endswith("/api/db-reconnect"),
+            request.url.path.endswith("/health"),
+            request.url.path.endswith("/api/health")
+        ])
+        
+        if skip_db_error_check:
+            # Skip DB checking for diagnostics endpoints
+            return await call_next(request)
+        
+        # Check if database is connected
+        db_status = get_db_status()
+        if not db_status.get("is_connected", False):
+            # Database is not connected, try to reconnect
+            logger.warning(f"Database connection lost before request to {request.url.path}. Attempting reconnect.")
+            reconnect_success = force_db_reconnect()
+            
+            if not reconnect_success:
+                # If reconnection failed, return a service unavailable response
+                error_id = str(uuid.uuid4())
+                logger.error(f"Database reconnection failed for request to {request.url.path}. Error ID: {error_id}")
+                
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={
+                        "status": "error",
+                        "message": "Database connection is unavailable. Please try again later.",
+                        "error_id": error_id,
+                        "error_code": "DATABASE_UNAVAILABLE"
+                    }
+                )
+        
+        # Continue with the request if database is connected
+        return await call_next(request)
+    except Exception as e:
+        # Log the error
+        error_id = str(uuid.uuid4())
+        logger.error(f"Error in database middleware: {str(e)}. Error ID: {error_id}")
+        
+        # Return a generic error response
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "error",
+                "message": "Internal server error occurred while processing the request.",
+                "error_id": error_id,
+                "error_code": "INTERNAL_SERVER_ERROR"
+            }
+        )
 
 # Pydantic models for API response
 class MetricsSummary(BaseModel):
@@ -657,18 +730,6 @@ async def test_cors(request: Request):
     
     return response
 
-@app.get("/api/test-cors")
-async def test_cors():
-    """
-    Test endpoint to verify CORS configuration
-    Returns details about the CORS configuration to help with debugging
-    """
-    return {
-        "message": "CORS is working correctly!",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "status": "success"
-    }
-
 # API endpoints
 @app.get("/api/metrics/summary", response_model=List[MetricsSummary])
 def get_metrics_summary(start_date: datetime.date, end_date: datetime.date, db=Depends(get_db)):
@@ -756,849 +817,182 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.options("/api/campaigns/metrics")
-def campaigns_metrics_options():
-    """Handle OPTIONS preflight request for the campaigns/metrics endpoint"""
-    return {"detail": "CORS preflight request handled"}
-
-@app.get("/api/campaigns/metrics", response_model=List[Dict])
-def get_campaigns_metrics(db=Depends(get_db)):
-    """
-    Get all campaign metrics for the master tab view.
-    Respects the campaign mapping infrastructure to unify metrics across data sources.
-    """
-    try:
-        # First get all active mappings to ensure we include all configured campaigns
-        mapping_query = text("""
-            SELECT 
-                id,
-                source_system,
-                external_campaign_id,
-                pretty_campaign_name,
-                pretty_network,
-                pretty_source,
-                campaign_category,
-                campaign_type,
-                network,
-                is_active
-            FROM public.sm_campaign_name_mapping
-            WHERE is_active = TRUE
-            ORDER BY display_order, pretty_campaign_name
-        """)
-        
-        print("Fetching campaign mappings...")
-        mappings = {
-            # Use tuple of (source_system, external_campaign_id) as key
-            (row.source_system, row.external_campaign_id): dict(row._mapping)
-            for row in db.execute(mapping_query)
-        }
-        
-        print(f"Found {len(mappings)} active campaign mappings")
-        
-        # Now query Google Ads metrics (currently the only source with data)
-        metrics_query = text("""
-            SELECT 
-                campaign_id,
-                campaign_name,
-                date,
-                impressions,
-                clicks,
-                cost,
-                conversions
-            FROM public.sm_fact_google_ads
-            ORDER BY date DESC
-        """)
-        
-        print("Fetching Google Ads metrics...")
-        google_metrics = {}
-        for row in db.execute(metrics_query):
-            campaign_id = row.campaign_id
-            if campaign_id not in google_metrics:
-                google_metrics[campaign_id] = dict(row._mapping)
-        
-        print(f"Found metrics for {len(google_metrics)} Google Ads campaigns")
-        
-        # Combine mapping data with metrics
-        results = []
-        for (source, campaign_id), mapping in mappings.items():
-            metrics = None
-            
-            if source == 'Google Ads' and campaign_id in google_metrics:
-                metrics = google_metrics[campaign_id]
-            
-            if metrics:
-                # Build a combined result with both mapping and metrics data
-                result = {
-                    'mapping_id': mapping['id'],
-                    'campaign_id': campaign_id,
-                    'campaign_name': mapping['pretty_campaign_name'],
-                    'source_system': source,
-                    'pretty_source': mapping['pretty_source'],
-                    'pretty_network': mapping['pretty_network'],
-                    'is_active': mapping['is_active'],
-                    'date': metrics.get('date'),
-                    'impressions': metrics.get('impressions', 0),
-                    'clicks': metrics.get('clicks', 0),
-                    'spend': metrics.get('cost', 0.0),  # Rename cost to spend for model compatibility
-                    'conversions': metrics.get('conversions', 0),
-                    'revenue': 0.0,  # Not available for Google Ads
-                    'cpc': metrics.get('clicks', 0) and (metrics.get('cost', 0) / metrics.get('clicks', 0)) or 0,
-                    'smooth_leads': 0,  # Not available yet
-                    'total_sales': 0,   # Not available yet
-                    'users': 0,         # Not available yet
-                }
-                results.append(result)
-        
-        print(f"Returning {len(results)} combined campaign metrics results")
-        
-        if not results:
-            print("No campaigns found with metrics, returning empty list")
-            return []
-        
-        return results
-    except Exception as e:
-        print(f"Error in campaign metrics: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@app.get("/api/campaign-metrics")
-def get_campaign_metrics(
-    start_date: datetime.date = Query(..., description="Start date for metrics"),
-    end_date: datetime.date = Query(..., description="End date for metrics"),
-    platform: Optional[str] = Query(None, description="Filter by platform (e.g., google_ads, bing_ads)"),
-    network: Optional[str] = Query(None, description="Filter by network (e.g., Search, Display)"),
-    db=Depends(get_db)
-):
-    """
-    Get campaign metrics for the specified date range
-    """
-    try:
-        query = """
-            SELECT 
-                platform,
-                network,
-                campaign_id,
-                campaign_name,
-                original_campaign_name,
-                campaign_category,
-                campaign_type,
-                SUM(impressions) as impressions,
-                SUM(clicks) as clicks,
-                SUM(cost) as cost,
-                SUM(conversions) as conversions,
-                AVG(ctr) as ctr,
-                AVG(conversion_rate) as conversion_rate,
-                AVG(cost_per_conversion) as cost_per_conversion
-            FROM public.sm_campaign_performance
-            WHERE date BETWEEN :start_date AND :end_date
-        """
-        
-        params = {"start_date": start_date, "end_date": end_date}
-        
-        if platform:
-            query += " AND platform = :platform"
-            params["platform"] = platform
-            
-        if network:
-            query += " AND network = :network"
-            params["network"] = network
-            
-        query += """ 
-            GROUP BY 
-                platform, 
-                network,
-                campaign_id, 
-                campaign_name, 
-                original_campaign_name,
-                campaign_category,
-                campaign_type
-            ORDER BY cost DESC
-        """
-        
-        result = db.execute(text(query), params)
-        campaigns = []
-        
-        for row in result:
-            campaign = dict(row._mapping)
-            # Format numeric values for JSON response
-            campaign["impressions"] = int(campaign["impressions"]) if campaign["impressions"] else 0
-            campaign["clicks"] = int(campaign["clicks"]) if campaign["clicks"] else 0
-            campaign["cost"] = float(campaign["cost"]) if campaign["cost"] else 0.0
-            campaign["conversions"] = float(campaign["conversions"]) if campaign["conversions"] else 0.0
-            campaign["ctr"] = float(campaign["ctr"]) if campaign["ctr"] else 0.0
-            campaign["conversion_rate"] = float(campaign["conversion_rate"]) if campaign["conversion_rate"] else 0.0
-            campaign["cost_per_conversion"] = float(campaign["cost_per_conversion"]) if campaign["cost_per_conversion"] else 0.0
-            
-            campaigns.append(campaign)
-            
-        return campaigns
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Campaign mapping endpoints
-@app.get("/api/campaign-mappings", response_model=List[CampaignMapping])
-def get_campaign_mappings(source_system: Optional[str] = None, db=Depends(get_db)):
-    """
-    Get all campaign mappings with optional filtering by source system
-    """
-    try:
-        query = """
-            SELECT * FROM public.sm_campaign_name_mapping
-            WHERE is_active = TRUE
-        """
-        
-        if source_system:
-            query += f" AND source_system = '{source_system}'"
-            
-        query += " ORDER BY source_system, original_campaign_name"
-        
-        result = db.execute(text(query))
-        mappings = [dict(row._mapping) for row in result]
-        
-        return mappings
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/unmapped-campaigns", response_model=List[UnmappedCampaign])
-def get_unmapped_campaigns(db=Depends(get_db)):
-    """
-    Get list of campaigns that haven't been mapped yet
-    """
-    try:
-        # First, log counts from each fact table for debugging
-        table_counts = {}
-        for table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack"]:
-            try:
-                count_query = f"SELECT COUNT(*) FROM public.{table}"
-                count = db.execute(text(count_query)).scalar() or 0
-                table_counts[table] = count
-                
-                # Also check unique campaigns
-                unique_query = f"SELECT COUNT(DISTINCT campaign_id) FROM public.{table}"
-                unique_count = db.execute(text(unique_query)).scalar() or 0
-                table_counts[f"{table}_unique"] = unique_count
-            except Exception as e:
-                logger.error(f"Error checking table {table}: {str(e)}")
-                table_counts[table] = f"ERROR: {str(e)}"
-        
-        logger.info(f"Table row counts: {table_counts}")
-        
-        # Check if tables exist
-        table_exists_query = """
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name IN ('sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack', 'sm_campaign_name_mapping')
-        """
-        existing_tables = [row[0] for row in db.execute(text(table_exists_query)).fetchall()]
-        logger.info(f"Existing tables: {existing_tables}")
-        
-        # If any tables are missing, create them
-        missing_tables = []
-        for table in ["sm_fact_google_ads", "sm_fact_bing_ads", "sm_fact_matomo", "sm_fact_redtrack", "sm_campaign_name_mapping"]:
-            if table not in existing_tables:
-                missing_tables.append(table)
-        
-        if missing_tables:
-            logger.warning(f"Missing tables: {missing_tables}")
-            logger.info("Running database initialization to create missing tables")
-            from src.api.db_init import create_tables_if_not_exist
-            create_tables_if_not_exist(db)
-        
-        # Create a list to store all unmapped campaigns
-        unmapped_campaigns = []
-        
-        # Check if the mapping table exists
-        if "sm_campaign_name_mapping" not in existing_tables:
-            logger.warning("Campaign mapping table does not exist, creating it")
-            from src.api.db_init import create_tables_if_not_exist
-            create_tables_if_not_exist(db)
-        
-        # Process each data source if its table exists
-        if "sm_fact_google_ads" in existing_tables:
-            # Query for unmapped Google Ads campaigns
-            google_query = """
-                SELECT DISTINCT 
-                    'Google Ads' as source_system,
-                    CAST(g.campaign_id AS VARCHAR) as external_campaign_id,
-                    g.campaign_name as campaign_name,
-                    g.network as network
-                FROM 
-                    public.sm_fact_google_ads g
-                LEFT JOIN 
-                    public.sm_campaign_name_mapping m ON 
-                    CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
-                    AND m.source_system = 'Google Ads'
-                    AND m.is_active = TRUE
-                WHERE 
-                    m.id IS NULL
-            """
-            
-            try:
-                google_results = db.execute(text(google_query)).fetchall()
-                logger.info(f"Found {len(google_results)} unmapped Google Ads campaigns")
-                
-                for row in google_results:
-                    unmapped_campaigns.append({
-                        "source_system": row[0],
-                        "external_campaign_id": row[1],
-                        "campaign_name": row[2],
-                        "network": row[3] if len(row) > 3 else None
-                    })
-            except Exception as e:
-                logger.error(f"Error querying unmapped Google Ads campaigns: {str(e)}")
-        
-        if "sm_fact_bing_ads" in existing_tables:
-            # Query for unmapped Bing Ads campaigns
-            bing_query = """
-                SELECT DISTINCT 
-                    'Bing Ads' as source_system,
-                    CAST(b.campaign_id AS VARCHAR) as external_campaign_id,
-                    b.campaign_name as campaign_name,
-                    b.network as network
-                FROM 
-                    public.sm_fact_bing_ads b
-                LEFT JOIN 
-                    public.sm_campaign_name_mapping m ON 
-                    CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
-                    AND m.source_system = 'Bing Ads'
-                    AND m.is_active = TRUE
-                WHERE 
-                    m.id IS NULL
-            """
-            
-            try:
-                bing_results = db.execute(text(bing_query)).fetchall()
-                logger.info(f"Found {len(bing_results)} unmapped Bing Ads campaigns")
-                
-                for row in bing_results:
-                    unmapped_campaigns.append({
-                        "source_system": row[0],
-                        "external_campaign_id": row[1],
-                        "campaign_name": row[2],
-                        "network": row[3] if len(row) > 3 else None
-                    })
-            except Exception as e:
-                logger.error(f"Error querying unmapped Bing Ads campaigns: {str(e)}")
-        
-        if "sm_fact_matomo" in existing_tables:
-            # Query for unmapped Matomo campaigns
-            matomo_query = """
-                SELECT DISTINCT 
-                    'Matomo' as source_system,
-                    CAST(m.campaign_id AS VARCHAR) as external_campaign_id,
-                    m.campaign_name as campaign_name,
-                    m.network as network
-                FROM 
-                    public.sm_fact_matomo m
-                LEFT JOIN 
-                    public.sm_campaign_name_mapping mm ON 
-                    CAST(m.campaign_id AS VARCHAR) = mm.external_campaign_id 
-                    AND mm.source_system = 'Matomo'
-                    AND mm.is_active = TRUE
-                WHERE 
-                    mm.id IS NULL
-            """
-            
-            try:
-                matomo_results = db.execute(text(matomo_query)).fetchall()
-                logger.info(f"Found {len(matomo_results)} unmapped Matomo campaigns")
-                
-                for row in matomo_results:
-                    unmapped_campaigns.append({
-                        "source_system": row[0],
-                        "external_campaign_id": row[1],
-                        "campaign_name": row[2],
-                        "network": row[3] if len(row) > 3 else None
-                    })
-            except Exception as e:
-                logger.error(f"Error querying unmapped Matomo campaigns: {str(e)}")
-        
-        if "sm_fact_redtrack" in existing_tables:
-            # Query for unmapped RedTrack campaigns
-            redtrack_query = """
-                SELECT DISTINCT 
-                    'RedTrack' as source_system,
-                    CAST(r.campaign_id AS VARCHAR) as external_campaign_id,
-                    r.campaign_name as campaign_name,
-                    r.network as network
-                FROM 
-                    public.sm_fact_redtrack r
-                LEFT JOIN 
-                    public.sm_campaign_name_mapping m ON 
-                    CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
-                    AND m.source_system = 'RedTrack'
-                    AND m.is_active = TRUE
-                WHERE 
-                    m.id IS NULL
-            """
-            
-            try:
-                redtrack_results = db.execute(text(redtrack_query)).fetchall()
-                logger.info(f"Found {len(redtrack_results)} unmapped RedTrack campaigns")
-                
-                for row in redtrack_results:
-                    unmapped_campaigns.append({
-                        "source_system": row[0],
-                        "external_campaign_id": row[1],
-                        "campaign_name": row[2],
-                        "network": row[3] if len(row) > 3 else None
-                    })
-            except Exception as e:
-                logger.error(f"Error querying unmapped RedTrack campaigns: {str(e)}")
-        
-        # Log the total number of unmapped campaigns found
-        logger.info(f"Total unmapped campaigns found: {len(unmapped_campaigns)}")
-        
-        return unmapped_campaigns
-    except Exception as e:
-        logger.error(f"Error getting unmapped campaigns: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/campaign-mappings", response_model=CampaignMapping)
-def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
-    """
-    Create a new campaign mapping
-    """
-    try:
-        # Check if mapping exists
-        existing_query = """
-            SELECT * FROM public.sm_campaign_name_mapping
-            WHERE source_system = :source_system
-            AND external_campaign_id = :external_campaign_id
-        """
-        existing = db.execute(text(existing_query), {
-            "source_system": mapping.source_system,
-            "external_campaign_id": mapping.external_campaign_id
-        }).fetchone()
-        
-        if existing:
-            # Update existing mapping
-            query = """
-                UPDATE public.sm_campaign_name_mapping
-                SET 
-                    pretty_campaign_name = :pretty_campaign_name,
-                    campaign_category = :campaign_category,
-                    campaign_type = :campaign_type,
-                    network = :network,
-                    pretty_network = :pretty_network,
-                    pretty_source = :pretty_source,
-                    is_active = TRUE,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-                RETURNING *
-            """
-            result = db.execute(text(query), {
-                "id": existing.id,
-                "pretty_campaign_name": mapping.pretty_campaign_name,
-                "campaign_category": mapping.campaign_category,
-                "campaign_type": mapping.campaign_type,
-                "network": mapping.network,
-                "pretty_network": mapping.pretty_network,
-                "pretty_source": mapping.pretty_source
-            }).fetchone()
-            
-            db.commit()
-            return dict(result._mapping)
-        else:
-            # Insert new mapping with ON CONFLICT clause as recommended by senior dev
-            query = """
-                INSERT INTO public.sm_campaign_name_mapping (
-                    source_system, 
-                    external_campaign_id, 
-                    original_campaign_name, 
-                    pretty_campaign_name, 
-                    campaign_category, 
-                    campaign_type, 
-                    network, 
-                    display_order,
-                    pretty_network,
-                    pretty_source,
-                    is_active
-                )
-                VALUES (
-                    :source_system, 
-                    :external_campaign_id, 
-                    :original_campaign_name, 
-                    :pretty_campaign_name, 
-                    :campaign_category, 
-                    :campaign_type, 
-                    :network, 
-                    :display_order,
-                    :pretty_network,
-                    :pretty_source,
-                    TRUE
-                )
-                ON CONFLICT (source_system, external_campaign_id)
-                DO UPDATE SET
-                    original_campaign_name = EXCLUDED.original_campaign_name,
-                    pretty_campaign_name = EXCLUDED.pretty_campaign_name,
-                    campaign_category = EXCLUDED.campaign_category,
-                    campaign_type = EXCLUDED.campaign_type,
-                    network = EXCLUDED.network,
-                    pretty_network = EXCLUDED.pretty_network,
-                    pretty_source = EXCLUDED.pretty_source,
-                    is_active = TRUE,
-                    updated_at = CURRENT_TIMESTAMP
-                RETURNING *
-            """
-            
-            result = db.execute(text(query), {
-                "source_system": mapping.source_system,
-                "external_campaign_id": mapping.external_campaign_id,
-                "original_campaign_name": mapping.original_campaign_name,
-                "pretty_campaign_name": mapping.pretty_campaign_name,
-                "campaign_category": mapping.campaign_category,
-                "campaign_type": mapping.campaign_type,
-                "network": mapping.network,
-                "display_order": mapping.display_order or 0,
-                "pretty_network": mapping.pretty_network,
-                "pretty_source": mapping.pretty_source
-            })
-            
-            db.commit()
-            return dict(result.fetchone()._mapping)
+# Create a function to handle database errors consistently
+def handle_db_error(error: Exception, operation: str):
+    """Handle database errors consistently across endpoints"""
+    error_id = str(uuid.uuid4())
+    error_msg = str(error)
+    logger.error(f"Database error during {operation} [ID: {error_id}]: {error_msg}")
+    logger.error(traceback.format_exc())
     
-    except Exception as e:
-        logger.error(f"Error creating campaign mapping: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/campaign-mappings/{mapping_id}")
-def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
-    """
-    Delete a campaign mapping (soft delete by setting is_active to false)
-    """
-    try:
-        query = """
-            UPDATE public.sm_campaign_name_mapping
-            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id
-        """
-        
-        db.execute(text(query), {"id": mapping_id})
-        db.commit()
-        
-        return {"message": "Mapping deleted successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical])
-def get_hierarchical_campaigns(db=Depends(get_db)):
-    """Get all campaign data in a hierarchical structure with metrics"""
-    try:
-        # First check if display_order column exists
-        check_column_query = """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-        AND table_name = 'sm_campaign_name_mapping' 
-        AND column_name = 'display_order'
-        """
-        
-        has_display_order = db.execute(text(check_column_query)).fetchone() is not None
-        
-        # Adjust query based on whether display_order exists
-        if has_display_order:
-            order_by_clause = "m.source_system, m.network, m.display_order, m.pretty_campaign_name"
-            display_order_col = "m.display_order as display_order,"
-        else:
-            order_by_clause = "m.source_system, m.network, m.pretty_campaign_name"
-            display_order_col = "0 as display_order,"
-        
-        # Get current date range for the last 30 days
-        end_date = datetime.date.today()
-        start_date = end_date - datetime.timedelta(days=30)
-        
-        query = f"""
-            SELECT 
-                m.id,
-                m.source_system,
-                m.external_campaign_id,
-                m.original_campaign_name,
-                m.pretty_campaign_name,
-                m.campaign_category,
-                m.campaign_type,
-                m.network,
-                {display_order_col}
-                COALESCE(SUM(p.impressions), 0) as impressions,
-                COALESCE(SUM(p.clicks), 0) as clicks,
-                COALESCE(SUM(p.conversions), 0) as conversions,
-                COALESCE(SUM(p.cost), 0) as cost
-            FROM 
-                sm_campaign_name_mapping m
-            LEFT JOIN
-                sm_campaign_performance p 
-                ON p.campaign_id = m.external_campaign_id
-                AND p.date BETWEEN :start_date AND :end_date
-            WHERE 
-                m.is_active = TRUE
-            GROUP BY
-                m.id,
-                m.source_system,
-                m.external_campaign_id,
-                m.original_campaign_name,
-                m.pretty_campaign_name,
-                m.campaign_category,
-                m.campaign_type,
-                m.network
-                {', m.display_order' if has_display_order else ''}
-            ORDER BY 
-                {order_by_clause}
-        """
-        
-        result = db.execute(text(query), {"start_date": start_date, "end_date": end_date}).fetchall()
-        
-        # Convert to list of dictionaries
-        return [dict(row._mapping) for row in result]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/campaign-order")
-def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
-    """Update the display order of campaigns"""
-    try:
-        # First check if display_order column exists
-        check_column_query = """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-        AND table_name = 'sm_campaign_name_mapping' 
-        AND column_name = 'display_order'
-        """
-        
-        has_display_order = db.execute(text(check_column_query)).fetchone() is not None
-        
-        # If display_order doesn't exist, create it
-        if not has_display_order:
-            add_column_query = """
-            ALTER TABLE public.sm_campaign_name_mapping
-            ADD COLUMN display_order INT DEFAULT 0
-            """
-            db.execute(text(add_column_query))
-            db.commit()
-        
-        # Update the display_order for each campaign
-        for order in orders:
-            query = """
-                UPDATE sm_campaign_name_mapping
-                SET display_order = :display_order,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            """
-            
-            db.execute(
-                text(query),
-                {
-                    "id": order.id,
-                    "display_order": order.display_order
-                }
-            )
-        
-        db.commit()
-        return {"success": True, "message": "Campaign orders updated successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.options("/api/admin/clear_google_ads_mappings")
-async def options_clear_google_ads_mappings():
-    return handle_cors_preflight()
-
-@app.options("/api/admin/import_real_google_ads_data")
-async def options_import_real_google_ads_data():
-    return handle_cors_preflight()
-
-def handle_cors_preflight():
-    """Handle CORS preflight requests with appropriate headers"""
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Max-Age": "3600",
-    }
-    return JSONResponse(content={}, headers=headers)
-
-@app.post("/api/admin/clear_google_ads_mappings")
-def admin_clear_google_ads_mappings(db=Depends(get_db)):
-    """Clear all Google Ads campaign mappings"""
-    from admin_commands import clear_google_ads_mappings
-    
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    }
-    
-    try:
-        logger.info("Admin endpoint: clear_google_ads_mappings called")
-        success = clear_google_ads_mappings(db)
+    if "Network is unreachable" in error_msg or "Could not connect to server" in error_msg:
         return JSONResponse(
-            content={"success": success},
-            headers=headers
-        )
-    except Exception as e:
-        logger.error(f"Error in clear_google_ads_mappings endpoint: {str(e)}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500,
-            headers=headers
-        )
-
-@app.post("/api/admin/import_real_google_ads_data")
-def admin_import_real_google_ads_data(data: dict = Body(None), db=Depends(get_db)):
-    """Import real Google Ads data"""
-    from admin_commands import import_real_google_ads_data
-    
-    headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    }
-    
-    try:
-        logger.info(f"Admin endpoint: import_real_google_ads_data called with data: {type(data)}")
-        success = import_real_google_ads_data(db, data)
-        return JSONResponse(
-            content={"success": success},
-            headers=headers
-        )
-    except Exception as e:
-        logger.error(f"Error in import_real_google_ads_data endpoint: {str(e)}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500,
-            headers=headers
-        )
-
-@app.get("/api/google-ads/campaigns")
-def get_google_ads_campaigns(db=Depends(get_db)):
-    """Get all Google Ads campaigns"""
-    logger.info("Endpoint called: get_google_ads_campaigns")
-    try:
-        # Query Google Ads campaigns from the database
-        query = text("""
-        SELECT 
-            id, 
-            campaign_id, 
-            campaign_name,
-            COALESCE(campaign_name, '') as pretty_campaign_name,
-            '' as campaign_type,
-            '' as network
-        FROM (
-            SELECT DISTINCT
-                id,
-                campaign_id,
-                campaign_name
-            FROM sm_fact_google_ads
-        ) c
-        ORDER BY campaign_name
-        """)
-        
-        result = db.execute(query).fetchall()
-        
-        # Convert to list of dictionaries
-        campaigns = []
-        for row in result:
-            campaign = {
-                "id": row[0],
-                "campaign_id": row[1],
-                "campaign_name": row[2],
-                "pretty_campaign_name": row[3],
-                "campaign_type": row[4],
-                "network": row[5]
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": "Database connection failed. This may be due to network connectivity issues.",
+                "error_id": error_id,
+                "error_type": "database_unreachable"
             }
-            campaigns.append(campaign)
-        
-        logger.info(f"Retrieved {len(campaigns)} Google Ads campaigns")
-        return campaigns
-    except Exception as e:
-        logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/websocket-status", tags=["Diagnostics"])
-async def websocket_status():
-    """
-    Endpoint to check the status of the WebSocket server.
-    Returns information about the WebSocket configuration and active connections.
-    """
-    try:
-        active_connections = len(manager.active_connections) if 'manager' in globals() else 0
-        
-        return {
-            "status": "running",
-            "active_connections": active_connections,
-            "websocket_endpoint": "/ws",
-            "fallback_endpoint": "/api/ws-fallback",
-            "server_time": datetime.datetime.now().isoformat()
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "server_time": datetime.datetime.now().isoformat()
-        }
-
-# Fallback OPTIONS handler for all routes
-@app.options("/{path:path}")
-async def options_handler(path: str, request: Request):
-    """
-    Global OPTIONS handler to ensure CORS preflight requests are handled for all routes
-    This is a fallback in case FastAPI's built-in CORS handling fails
-    """
-    print(f"Handling OPTIONS request for path: /{path}")
-    
-    # Get the origin from the request
-    origin = request.headers.get("origin", "")
-    
-    # Create a response
-    response = JSONResponse(content={"detail": "CORS preflight request handled"})
-    
-    # Set CORS headers
-    if origin and origin in origins:
-        response.headers["access-control-allow-origin"] = origin
-        response.headers["access-control-allow-credentials"] = "true"
+        )
+    elif "does not exist" in error_msg and ("relation" in error_msg or "table" in error_msg):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": "Required database tables do not exist. Database initialization may not have completed.",
+                "error_id": error_id,
+                "error_type": "missing_tables"
+            }
+        )
     else:
-        # For non-matching origins, return 403 to prevent cross-site access
-        response = JSONResponse(content={"detail": "Origin not allowed"}, status_code=403)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An unexpected database error occurred. Please try again later.",
+                "error_id": error_id,
+                "error_type": "database_error"
+            }
+        )
+
+# Add a new database test endpoint
+@app.get("/api/db-test", tags=["Diagnostics"])
+def test_db_connection():
+    """Test the database connection and return diagnostic information"""
+    try:
+        start_time = time.time()
+        
+        # Get monitoring status
+        monitor_status = get_db_status()
+        
+        # If not connected, try to reconnect
+        if not monitor_status["is_connected"]:
+            logger.warning("Db test: Monitor reports database not connected, attempting reconnect")
+            force_db_reconnect()
+            monitor_status = get_db_status()  # Get updated status
+        
+        # Test direct connection
+        with engine.connect() as conn:
+            # Run a basic query to test the connection
+            result = conn.execute(text("SELECT 1"))
+            basic_query_result = result.scalar()
             
-    response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    response.headers["access-control-allow-headers"] = "*"
-    response.headers["access-control-expose-headers"] = "*"
-    response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
-    
-    return response
+            # Get table information
+            inspector = inspect(engine)
+            tables = inspector.get_table_names()
+            
+            # Test more complex query if tables exist
+            campaign_count = 0
+            google_ads_data = False
+            if "sm_campaign_name_mapping" in tables:
+                result = conn.execute(text("SELECT COUNT(*) FROM sm_campaign_name_mapping"))
+                campaign_count = result.scalar()
+            
+            if "sm_fact_google_ads" in tables:
+                result = conn.execute(text("SELECT COUNT(*) > 0 FROM sm_fact_google_ads LIMIT 1"))
+                google_ads_data = result.scalar()
+            
+        elapsed_time = time.time() - start_time
+        
+        return {
+            "status": "success",
+            "message": "Database connection successful",
+            "monitor_status": monitor_status,
+            "test_query_result": basic_query_result,
+            "database_host": DATABASE_URL.split("@")[1].split("/")[0] if "@" in DATABASE_URL else "unknown",
+            "tables_found": len(tables),
+            "table_names": tables[:10],  # List first 10 tables only
+            "campaign_mappings_count": campaign_count,
+            "has_google_ads_data": google_ads_data,
+            "query_time_ms": round(elapsed_time * 1000, 2),
+            "railway_private_networking": "railway.internal" in DATABASE_URL
+        }
+    except Exception as e:
+        error_msg = str(e)
+        error_id = str(uuid.uuid4())
+        logger.error(f"Database test failed: {error_msg}. Error ID: {error_id}")
+        logger.error(traceback.format_exc())
+        
+        # Try to get monitor status even if connection failed
+        try:
+            monitor_status = get_db_status()
+        except Exception as monitor_error:
+            monitor_status = {"status": "error", "error": str(monitor_error)}
+        
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "error",
+                "message": f"Database connection failed: {error_msg}",
+                "error_id": error_id,
+                "monitor_status": monitor_status,
+                "database_url": DATABASE_URL.split("@")[1] if "@" in DATABASE_URL else "unknown",
+                "error_details": traceback.format_exc(),
+                "railway_private_networking": "railway.internal" in DATABASE_URL
+            }
+        )
 
-@app.get("/api/health")
-def api_health_check():
-    """
-    Simple health check endpoint for Railway
-    """
-    return {"status": "OK"}
+# Add a database status endpoint
+@app.get("/api/db-status", tags=["Diagnostics"])
+def get_database_status():
+    """Get the current database connection status"""
+    try:
+        # Get the status from the database monitor
+        status = get_db_status()
+        
+        # Enhance the status with additional information
+        enhanced_status = {
+            **status,
+            "database_url": DATABASE_URL.split("@")[1].split("/")[0] if "@" in DATABASE_URL else "unknown",
+            "railway_private_networking": "railway.internal" in DATABASE_URL,
+            "request_time": datetime.datetime.now().isoformat()
+        }
+        
+        return enhanced_status
+    except Exception as e:
+        error_msg = str(e)
+        error_id = str(uuid.uuid4())
+        logger.error(f"Error getting database status: {error_msg}. Error ID: {error_id}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "error",
+                "message": f"Failed to get database status: {error_msg}",
+                "error_id": error_id
+            }
+        )
 
-# Mount the React frontend static files
-frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src", "frontend", "build")
-app.mount("/static", StaticFiles(directory=os.path.join(frontend_path, "static")), name="static")
+# Add a database reconnect endpoint
+@app.post("/api/db-reconnect", tags=["Diagnostics"])
+def reconnect_database():
+    """Force a database reconnection"""
+    try:
+        # Log the reconnection attempt
+        logger.info("Manual database reconnection requested")
+        
+        # Force a reconnection
+        result = force_db_reconnect()
+        
+        # Get the updated status
+        status = get_db_status()
+        
+        return {
+            "status": "success" if result else "failed",
+            "message": "Database reconnection successful" if result else "Database reconnection failed",
+            "db_status": status,
+            "request_time": datetime.datetime.now().isoformat()
+        }
+    except Exception as e:
+        error_msg = str(e)
+        error_id = str(uuid.uuid4())
+        logger.error(f"Error reconnecting to database: {error_msg}. Error ID: {error_id}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "status": "error",
+                "message": f"Failed to reconnect to database: {error_msg}",
+                "error_id": error_id
+            }
+        )
 
-@app.get("/api/test-cors", tags=["Diagnostics"])
-async def test_cors_detailed(request: Request):
-    """
-    Alias for /api/cors-test endpoint.
-    """
-    return await test_cors(request)
-
-# This must be the last route to avoid conflicts with API routes
-@app.get("/{path:path}")
-async def catch_all_routes(path: str):
-    if path.startswith("api/"):
-        raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse(os.path.join(frontend_path, "index.html"))
-
-if __name__ == "__main__":
-    import uvicorn
-    # Get port from environment variable or use 5000 as default
-    port = int(os.environ.get("PORT", 5000))
-    print(f"Starting server on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+# ... rest of your code remains the same ...

@@ -37,7 +37,9 @@ import UnifiedDashboard from './components/UnifiedDashboard';
 import CampaignMapping from './components/CampaignMapping';
 import WebSocketTest from './components/WebSocketTest';
 import CorsTest from './components/CorsTest';
+import DatabaseStatus from './components/DatabaseStatus';
 import corsProxy from './utils/corsProxy';
+import { API_BASE_URL, APP_SETTINGS } from './config';
 
 // Create a theme
 const theme = createTheme({
@@ -54,8 +56,7 @@ const theme = createTheme({
   },
 });
 
-// API base URL (set in .env)
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+// API base URL is now imported from config.js
 
 function App() {
   // State variables
@@ -356,6 +357,7 @@ function App() {
                 onClose={handleCloseSettings}
               >
                 <MenuItem component={Link} to="/mapping" onClick={handleCloseSettings}>Campaign Name Mapping</MenuItem>
+                <MenuItem component={Link} to="/db-status" onClick={handleCloseSettings}>Database Status</MenuItem>
                 <MenuItem component={Link} to="/websocket-test" onClick={handleCloseSettings}>WebSocket Test</MenuItem>
                 <MenuItem component={Link} to="/cors-test" onClick={handleCloseSettings}>CORS Test</MenuItem>
               </Menu>
@@ -366,6 +368,7 @@ function App() {
             <Routes>
               <Route path="/" element={<UnifiedDashboard />} />
               <Route path="/mapping" element={<CampaignMapping />} />
+              <Route path="/db-status" element={<DatabaseStatus />} />
               <Route path="/websocket-test" element={<WebSocketTest />} />
               <Route path="/cors-test" element={<CorsTest />} />
             </Routes>
