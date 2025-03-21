@@ -122,23 +122,45 @@ print("=====================================================")
 print("INITIALIZING FASTAPI APP")
 print("=====================================================")
 
-# Define allowed origins - allow all origins for testing
-origins = ["*"]  # Allow all origins for testing
+# Define allowed origins - allow specific domains and Railway frontend
+origins = [
+    "https://front-production-f6e6.up.railway.app",  # Railway frontend
+    "http://localhost:3000",  # Local development frontend
+    "http://localhost:5000",  # Local development with dev server
+    "http://localhost:5001"   # Local development with alt port
+]
 
 # Add CORS middleware directly to the main app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=False,  # Cannot use credentials with wildcard origins
+    allow_credentials=True,  # Allow cookies and credentials
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=86400,  # Cache preflight for 24 hours
 )
 
 # Add middleware to log all requests and add CORS headers
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
     origin = request.headers.get("origin", "")
+    
+    # For OPTIONS requests, return a response immediately with CORS headers
+    if request.method == "OPTIONS":
+        response = JSONResponse(content={"detail": "CORS preflight handled"})
+        if origin and origin in origins:
+            response.headers["access-control-allow-origin"] = origin
+            response.headers["access-control-allow-credentials"] = "true"
+        else:
+            # For non-matching origins, return 403 to prevent cross-site access
+            response = JSONResponse(content={"detail": "Origin not allowed"}, status_code=403)
+            
+        response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["access-control-allow-headers"] = "*"
+        response.headers["access-control-expose-headers"] = "*"
+        response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
+        return response
     
     # Default response in case there's an error
     try:
@@ -150,15 +172,15 @@ async def add_cors_headers(request, call_next):
             
             # If the request has a specific origin header that's in our allowed list,
             # use that exact origin in the response
-            if origin and (origin in origins or "*" in origins):
+            if origin and origin in origins:
                 response.headers["access-control-allow-origin"] = origin
-            else:
-                response.headers["access-control-allow-origin"] = "*"
+                response.headers["access-control-allow-credentials"] = "true"
+            # Don't set CORS headers for non-allowed origins
                 
-            response.headers["access-control-allow-credentials"] = "true"
             response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
             response.headers["access-control-allow-headers"] = "*"
             response.headers["access-control-expose-headers"] = "*"
+            response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
         
         return response
     except Exception as e:
@@ -167,15 +189,15 @@ async def add_cors_headers(request, call_next):
         resp = JSONResponse(content={"detail": "Internal server error"}, status_code=500)
         
         # Apply CORS headers to error response
-        if origin and (origin in origins or "*" in origins):
+        if origin and origin in origins:
             resp.headers["access-control-allow-origin"] = origin
-        else:
-            resp.headers["access-control-allow-origin"] = "*"
+            resp.headers["access-control-allow-credentials"] = "true"
+        # Don't set CORS headers for non-allowed origins
             
-        resp.headers["access-control-allow-credentials"] = "true"
         resp.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         resp.headers["access-control-allow-headers"] = "*"
         resp.headers["access-control-expose-headers"] = "*"
+        resp.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
         
         return resp
 
@@ -595,16 +617,44 @@ def health_check(db=Depends(get_db)):
     return health_status
 
 # Health check endpoint to test CORS headers
-@app.get("/api/cors-test")
-async def cors_test_for_healthcheck():
+@app.get("/api/cors-test", tags=["Diagnostics"])
+async def test_cors(request: Request):
     """
-    Test endpoint specifically for Railway healthcheck
+    Test endpoint to verify CORS configuration
+    Returns details about the CORS configuration to help with debugging
     """
-    return {
-        "message": "CORS is working correctly!",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "status": "success"
-    }
+    # Get the origin from the request
+    origin = request.headers.get("origin", "No origin provided")
+    is_allowed = origin in origins
+    
+    # Return detailed information about the request and CORS configuration
+    response = JSONResponse(
+        content={
+            "message": "CORS test endpoint",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "request_origin": origin,
+            "is_origin_allowed": is_allowed,
+            "allowed_origins": origins,
+            "cors_middleware": {
+                "allow_credentials": True,
+                "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+                "max_age": 86400
+            },
+            "status": "success" if is_allowed else "rejected"
+        }
+    )
+    
+    # Set CORS headers manually for this test endpoint
+    if is_allowed:
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+    
+    response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["access-control-allow-headers"] = "*"
+    response.headers["access-control-expose-headers"] = "*"
+    response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
+    
+    return response
 
 @app.get("/api/test-cors")
 async def test_cors():
@@ -1415,13 +1465,33 @@ async def websocket_status():
 
 # Fallback OPTIONS handler for all routes
 @app.options("/{path:path}")
-async def options_handler(path: str):
+async def options_handler(path: str, request: Request):
     """
     Global OPTIONS handler to ensure CORS preflight requests are handled for all routes
     This is a fallback in case FastAPI's built-in CORS handling fails
     """
     print(f"Handling OPTIONS request for path: /{path}")
-    return {"detail": "CORS preflight request handled"}
+    
+    # Get the origin from the request
+    origin = request.headers.get("origin", "")
+    
+    # Create a response
+    response = JSONResponse(content={"detail": "CORS preflight request handled"})
+    
+    # Set CORS headers
+    if origin and origin in origins:
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+    else:
+        # For non-matching origins, return 403 to prevent cross-site access
+        response = JSONResponse(content={"detail": "Origin not allowed"}, status_code=403)
+            
+    response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["access-control-allow-headers"] = "*"
+    response.headers["access-control-expose-headers"] = "*"
+    response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
+    
+    return response
 
 @app.get("/api/health")
 def api_health_check():
@@ -1437,25 +1507,9 @@ app.mount("/static", StaticFiles(directory=os.path.join(frontend_path, "static")
 @app.get("/api/test-cors", tags=["Diagnostics"])
 async def test_cors_detailed(request: Request):
     """
-    Comprehensive test endpoint to verify CORS configuration.
-    Returns detailed information about the request and response headers.
+    Alias for /api/cors-test endpoint.
     """
-    # Get all request headers
-    headers = {k: v for k, v in request.headers.items()}
-    
-    # Get origin header
-    origin = headers.get("origin", "No origin header found")
-    
-    # Return detailed information
-    return {
-        "status": "success",
-        "message": "CORS test endpoint",
-        "request_headers": headers,
-        "origin_received": origin,
-        "allowed_origins": origins,
-        "is_origin_allowed": origin in origins or "*" in origins,
-        "timestamp": datetime.datetime.now().isoformat()
-    }
+    return await test_cors(request)
 
 # This must be the last route to avoid conflicts with API routes
 @app.get("/{path:path}")
