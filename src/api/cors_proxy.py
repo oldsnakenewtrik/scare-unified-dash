@@ -42,7 +42,7 @@ origins = ["*"]  # Allow all origins for testing
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,  # Cannot use credentials with wildcard origins
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -65,7 +65,7 @@ async def log_requests(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "*"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        # response.headers["Access-Control-Allow-Credentials"] = "true"  # Cannot use with wildcard origin
         response.headers["Access-Control-Max-Age"] = "86400"  # Cache preflight response for 24 hours
         
         logger.info(f"Response: {response.status_code}")
@@ -81,6 +81,7 @@ async def log_requests(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "*"
+        # response.headers["Access-Control-Allow-Credentials"] = "true"  # Cannot use with wildcard origin
         response.headers["Access-Control-Max-Age"] = "86400"
         return response
 
@@ -112,7 +113,7 @@ async def options_handler(request: Request, path: str):
     response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
     response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
+    # response.headers["Access-Control-Allow-Credentials"] = "true"  # Cannot use with wildcard origin
     response.headers["Access-Control-Max-Age"] = "86400"  # Cache preflight response for 24 hours
     return response
 

@@ -39,8 +39,8 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       url: url,
       params: params,
       data: data,
-      // Add withCredentials to allow cookies to be sent
-      withCredentials: true,
+      // Don't use withCredentials when using wildcard CORS
+      // withCredentials: true,
       // Add headers to help with CORS
       headers: {
         'Content-Type': 'application/json',
