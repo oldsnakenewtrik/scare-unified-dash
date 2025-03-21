@@ -15,6 +15,7 @@ import logging
 import traceback
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Force the port to be 5000 to match Railway configuration
 os.environ["PORT"] = "5000"
@@ -597,19 +598,6 @@ def health_check(db=Depends(get_db)):
     return health_status
 
 # Health check endpoint to test CORS headers
-@app.get("/api/cors-test")
-async def test_cors():
-    """
-    Test endpoint to verify CORS configuration
-    Returns details about the CORS configuration to help with debugging
-    """
-    return {
-        "message": "CORS is working correctly!",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "status": "success"
-    }
-
-# Simple CORS test endpoint to verify headers
 @app.get("/api/cors-test")
 async def test_cors():
     """
