@@ -38,13 +38,14 @@ class WebSocketClient {
     this.socket = null;
     this.isConnected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
+    this.maxReconnectAttempts = 20; // Increased from 10 to 20
     this.reconnectDelay = 1000; // Start with 1 second delay
     this.listeners = [];
     this.messageQueue = [];
     this.pingInterval = null;
     this.url = getWebSocketUrl();
     this.fallbackMode = false;
+    this.connectionErrors = [];
     
     // Bind methods to this
     this.connect = this.connect.bind(this);
@@ -67,6 +68,7 @@ class WebSocketClient {
     
     // If we've reached the maximum number of reconnect attempts, switch to fallback mode
     if (this.reconnectAttempts >= this.maxReconnectAttempts && !this.fallbackMode) {
+      console.warn(`Maximum reconnection attempts (${this.maxReconnectAttempts}) reached, switching to fallback mode`);
       this.switchToFallbackMode();
       return;
     }
@@ -117,10 +119,18 @@ class WebSocketClient {
       
       this.socket.onerror = (error) => {
         console.error('WebSocket error:', error);
+        // Store the error for diagnostics
+        this.connectionErrors.push({
+          timestamp: new Date().toISOString(),
+          message: error.message || 'Unknown WebSocket error',
+          type: 'error'
+        });
+        
         this.notifyListeners({
           type: 'connection_status',
           status: 'error',
-          error
+          error,
+          errorCount: this.connectionErrors.length
         });
       };
       
@@ -152,7 +162,19 @@ class WebSocketClient {
   
   reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Maximum reconnection attempts reached');
+      console.error(`Maximum reconnection attempts (${this.maxReconnectAttempts}) reached`);
+      // Notify listeners about the failed reconnection attempts
+      this.notifyListeners({
+        type: 'connection_status',
+        status: 'reconnect_failed',
+        attempts: this.reconnectAttempts,
+        errors: this.connectionErrors
+      });
+      
+      // Switch to fallback mode
+      if (!this.fallbackMode) {
+        this.switchToFallbackMode();
+      }
       return;
     }
     
@@ -160,6 +182,15 @@ class WebSocketClient {
     const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), 30000);
     
     console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    
+    // Notify listeners about reconnection attempt
+    this.notifyListeners({
+      type: 'connection_status',
+      status: 'reconnecting',
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts,
+      delay
+    });
     
     setTimeout(() => {
       this.connect();
@@ -237,6 +268,9 @@ class WebSocketClient {
       clearInterval(this.pingInterval);
     }
     
+    // Reset connection errors
+    this.connectionErrors = [];
+    
     // Set up polling interval
     this.pingInterval = setInterval(() => {
       // Simulate connection status updates
@@ -254,7 +288,7 @@ class WebSocketClient {
         // In a real implementation, you would send these via HTTP POST
         // For now, we'll just log them
       }
-    }, 5000); // Poll every 5 seconds
+    }, 3000); // Poll every 3 seconds (reduced from 5 seconds)
     
     // Notify listeners that we're in fallback mode
     this.notifyListeners({

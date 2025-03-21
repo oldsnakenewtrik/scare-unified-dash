@@ -132,17 +132,40 @@ function App() {
     
     try {
       // Fetch all campaign data using CORS proxy
+      console.log('Fetching campaign metrics data...');
       const response = await corsProxy.get('/api/campaigns/metrics');
       
       // Transform and store the data
+      console.log('Campaign data received:', response.data.length, 'records');
       setCampaignData(response.data);
       
       // Apply initial filtering
       filterDataByTab(activeTab, response.data, showArchived);
     } catch (err) {
       console.error('Error fetching data:', err);
-      setError('Failed to fetch campaign data. Please try again later.');
       
+      // Provide more detailed error information
+      let errorMessage = 'Failed to fetch campaign data. ';
+      
+      if (err.code === 'ECONNABORTED') {
+        errorMessage += 'The request timed out. The server might be under heavy load or the dataset might be too large.';
+      } else if (err.response) {
+        // The server responded with a status code outside the 2xx range
+        errorMessage += `Server responded with status: ${err.response.status}. `;
+        if (err.response.data && err.response.data.detail) {
+          errorMessage += err.response.data.detail;
+        }
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMessage += 'No response received from server. Please check your network connection or try again later.';
+      } else {
+        // Something else happened while setting up the request
+        errorMessage += err.message || 'Unknown error occurred.';
+      }
+      
+      setError(errorMessage);
+      
+      console.log('Falling back to mock data due to API error');
       // For development/demo purposes, generate mock data
       const mockData = generateMockData();
       setCampaignData(mockData);

@@ -47,7 +47,7 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
         'Accept': 'application/json',
       },
       // Increase timeout for slow connections
-      timeout: 10000
+      timeout: 60000
     });
     console.log('Direct API call succeeded');
     return response;

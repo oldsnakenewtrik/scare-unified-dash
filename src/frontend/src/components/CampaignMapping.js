@@ -116,11 +116,14 @@ function CampaignMapping() {
       // Get source system from active tab
       const sourceSystem = getSourceFromTabIndex(activeTab) !== 'All' ? getSourceFromTabIndex(activeTab) : null;
       
+      console.log(`Fetching campaign mappings for source: ${sourceSystem || 'All'}`);
+      
       // Fetch all mapped campaigns with optional filter
       const mappedResponse = await corsProxy.get('/api/campaign-mappings', 
         sourceSystem ? { source_system: sourceSystem } : {}
       );
       
+      console.log(`Fetching unmapped campaigns...`);
       // Fetch all unmapped campaigns
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
@@ -130,11 +133,37 @@ function CampaignMapping() {
         ? allUnmapped.filter(c => c.source_system === sourceSystem)
         : allUnmapped;
       
+      console.log(`Received ${mappedResponse.data.length} mapped campaigns and ${filteredUnmapped.length} unmapped campaigns`);
+      
       setMappedCampaigns(mappedResponse.data);
       setUnmappedCampaigns(filteredUnmapped);
     } catch (err) {
       console.error('Error fetching campaign mapping data:', err);
-      setError('Failed to fetch campaign data. Please try again later.');
+      
+      // Provide more detailed error information
+      let errorMessage = 'Failed to fetch campaign data. ';
+      
+      if (err.code === 'ECONNABORTED') {
+        errorMessage += 'The request timed out. The server might be under heavy load or the dataset might be too large.';
+      } else if (err.response) {
+        // The server responded with a status code outside the 2xx range
+        errorMessage += `Server responded with status: ${err.response.status}. `;
+        if (err.response.data && err.response.data.detail) {
+          errorMessage += err.response.data.detail;
+        }
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMessage += 'No response received from server. Please check your network connection or try again later.';
+      } else {
+        // Something else happened while setting up the request
+        errorMessage += err.message || 'Unknown error occurred.';
+      }
+      
+      setError(errorMessage);
+      
+      // Set empty arrays to prevent null reference errors
+      setMappedCampaigns([]);
+      setUnmappedCampaigns([]);
     } finally {
       setLoading(false);
     }

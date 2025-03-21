@@ -4,9 +4,22 @@ import useWebSocket from '../hooks/useWebSocket';
 const WebSocketTest = () => {
   const { isConnected, connectionStatus, messages, error, send, clearMessages } = useWebSocket();
   const [message, setMessage] = useState('');
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [lastErrorTime, setLastErrorTime] = useState(null);
 
   // Display the last 10 messages
   const displayMessages = messages.slice(-10);
+
+  // Track connection attempts and errors
+  useEffect(() => {
+    if (connectionStatus === 'reconnecting') {
+      setConnectionAttempts(prev => prev + 1);
+    }
+    
+    if (connectionStatus === 'error' && error) {
+      setLastErrorTime(new Date().toISOString());
+    }
+  }, [connectionStatus, error]);
 
   // Send a message
   const handleSendMessage = () => {
@@ -35,10 +48,32 @@ const WebSocketTest = () => {
         return 'green';
       case 'disconnected':
         return 'red';
-      case 'error':
+      case 'reconnecting':
         return 'orange';
+      case 'error':
+        return 'red';
+      case 'fallback':
+        return 'blue';
       default:
         return 'gray';
+    }
+  };
+
+  // Get a human-readable status message
+  const getStatusMessage = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return 'Connected to WebSocket server';
+      case 'disconnected':
+        return 'Disconnected from WebSocket server';
+      case 'reconnecting':
+        return `Reconnecting (attempt ${connectionAttempts})...`;
+      case 'error':
+        return 'Connection error';
+      case 'fallback':
+        return 'Using fallback mode (HTTP polling)';
+      default:
+        return 'Unknown status';
     }
   };
 
@@ -47,17 +82,38 @@ const WebSocketTest = () => {
       <h2>WebSocket Test</h2>
       
       {/* Connection Status */}
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '20px', padding: '15px', border: '1px solid #eee', borderRadius: '5px', backgroundColor: '#f9f9f9' }}>
         <p>
           <strong>Connection Status:</strong>{' '}
-          <span style={{ color: getStatusColor() }}>
-            {connectionStatus} {isConnected ? '(Connected)' : '(Disconnected)'}
+          <span style={{ color: getStatusColor(), fontWeight: 'bold' }}>
+            {getStatusMessage()}
           </span>
         </p>
-        {error && (
-          <p style={{ color: 'red' }}>
-            <strong>Error:</strong> {error.message || JSON.stringify(error)}
+        <p>
+          <strong>WebSocket URL:</strong> {window.location.protocol === 'https:' ? 'wss://' : 'ws://'}{window.location.host}/ws
+        </p>
+        {connectionAttempts > 0 && (
+          <p>
+            <strong>Reconnection Attempts:</strong> {connectionAttempts}
           </p>
+        )}
+        {lastErrorTime && (
+          <p>
+            <strong>Last Error Time:</strong> {new Date(lastErrorTime).toLocaleTimeString()}
+          </p>
+        )}
+        {error && (
+          <div style={{ 
+            color: 'red', 
+            backgroundColor: '#fff0f0', 
+            padding: '10px', 
+            borderRadius: '4px',
+            marginTop: '10px',
+            border: '1px solid #ffcccc'
+          }}>
+            <strong>Error:</strong> {error.message || JSON.stringify(error)}
+            {error.code && <p><strong>Error Code:</strong> {error.code}</p>}
+          </div>
         )}
       </div>
       
