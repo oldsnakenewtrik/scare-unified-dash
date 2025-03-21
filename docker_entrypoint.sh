@@ -56,5 +56,5 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Start the API server with WebSocket support
-echo "Starting web server with CORS proxy and WebSocket support..."
-exec uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port "$PORT" --log-level debug --ws-ping-interval 20 --ws-ping-timeout 30
+echo "Starting web server with CORS and WebSocket support..."
+exec uvicorn src.api.main:app --host 0.0.0.0 --port "$PORT" --log-level debug --ws-ping-interval 20 --ws-ping-timeout 30
