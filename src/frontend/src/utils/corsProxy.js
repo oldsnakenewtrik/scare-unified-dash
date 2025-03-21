@@ -48,11 +48,12 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       params: params,
       data: data,
       // Add withCredentials to allow cookies to be sent
-      withCredentials: false,
+      withCredentials: true,
       // Add headers to help with CORS
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'Origin': window.location.origin
       }
     });
     console.log('Direct API call succeeded');

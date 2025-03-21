@@ -10,12 +10,14 @@ const getWebSocketUrl = () => {
   // If we're in the Railway production environment
   if (window.location.hostname.includes('railway.app')) {
     // Use the backend service URL with the WebSocket protocol
+    // Make sure we're using the correct port (no port in the URL for Railway)
     return `${protocol}//scare-unified-dash-production.up.railway.app/ws`;
   }
   
   // For local development
-  const port = process.env.REACT_APP_API_PORT || '5000';
-  return `${protocol}//${window.location.hostname}:${port}/ws`;
+  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+  const apiUrl = new URL(apiBaseUrl);
+  return `${protocol}//${apiUrl.hostname}:${apiUrl.port || '5000'}/ws`;
 };
 
 class WebSocketClient {

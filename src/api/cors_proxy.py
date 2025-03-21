@@ -40,8 +40,7 @@ origins = [
     "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
     "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
     "http://localhost:3000",  # Local frontend development
-    "http://localhost:5000",  # Local backend development
-    "*"  # Allow all origins as a fallback
+    "http://localhost:5000"   # Local backend development
 ]
 
 # Add CORS middleware to the proxy app
@@ -69,10 +68,12 @@ async def log_requests(request: Request, call_next):
         
         # Add CORS headers to all responses
         origin = request.headers.get("origin")
-        if origin:
+        if origin and origin in origins:
             response.headers["Access-Control-Allow-Origin"] = origin
         else:
-            response.headers["Access-Control-Allow-Origin"] = "*"
+            # For preflight requests or when origin is not in the allowed list
+            # We'll still set a default origin to help with debugging
+            response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
             
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
@@ -85,7 +86,7 @@ async def log_requests(request: Request, call_next):
         
         # Return a generic error response
         response = Response(content=str(e), status_code=500)
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
         return response
@@ -114,10 +115,12 @@ async def options_handler(request: Request, path: str):
     # Return an empty response with CORS headers
     response = Response()
     origin = request.headers.get("origin")
-    if origin:
+    if origin and origin in origins:
         response.headers["Access-Control-Allow-Origin"] = origin
     else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        # For preflight requests or when origin is not in the allowed list
+        # We'll still set a default origin to help with debugging
+        response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
         
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
