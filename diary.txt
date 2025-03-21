@@ -498,64 +498,7 @@ If `ping` is missing in production, you know your code is not deployed or you ha
 
 ---
 
-### 5. Resolve WebSocket Issues (Likely SSL or Proxy)
-
-You see:
-
-```
-WebSocket connection to 'wss://scare-unified-dash-production.up.railway.app/ws' failed: 
-```
-Here's what typically goes wrong:
-
-1. **Your production server must accept WS upgrades** on the same port as HTTP.  
-2. **SSL**: If your site is `https://`, you must use `wss://`. Usually that's correct, but you need to confirm your server container is actually aware of SSL termination. Some setups do SSL termination at the Railway load balancer, so your app might only see plain HTTP traffic.  
-3. **Reverse Proxy**: If your server code is not set up to handle `ws://` or `wss://` correctly, or if you have an older Uvicorn/Gunicorn mismatch that doesn't enable WebSocket routes, the handshake fails.
-
-**Check**:
-- In a typical FastAPI + WebSocket scenario, you might do:
-  ```python
-  @app.websocket("/ws")
-  async def websocket_endpoint(websocket: WebSocket):
-      await websocket.accept()
-      await websocket.send_text("Hello from WebSocket")
-  ```
-- In **Railway** logs, watch for errors about "Trying to upgrade to WebSocket but not found."  
-
-**Solution**: Make sure your production `uvicorn main:app --ws websockets ...` is set up, or you're using Starlette's built-in WebSocket support. Double-check `wss://` is correct and your domain's SSL is handled by Railway.
-
----
-
-### 6. Eliminate "CORS Proxy" Attempts in Production
-
-Your logs mention `corsProxy.js` or "fetchThroughProxy." This suggests your code tries to do:
-
-1. **Direct call** to `scare-unified-dash-production.up.railway.app`.  
-2. If it fails, it tries `corsproxy.io`, `https://cors-anywhere.herokuapp.com/`, etc.
-
-Those proxies might block your domain or require manual activation. **Remove** that fallback in production. The correct approach is for your server to return the proper CORS headers so no proxy is necessary.
-
----
-
-### 7. Watch Out for Timeouts
-
-You see:
-
-```
-Error fetching campaign data: AxiosError 
-message: 'timeout of 10000ms exceeded', code: 'ECONNABORTED'
-```
-That means your front-end waited 10 seconds, but the server never responded. Potential reasons:
-
-1. **Your server never got the request** (maybe the route doesn't exist, or your server is not truly listening).  
-2. **Your server's code is throwing an error** or is stuck. Check logs on Railway for Python or Node tracebacks.  
-3. **Network** or DNS issues. But less likely if the domain is correct.
-
-**Action**:
-- Lower your suspicion about CORS itself if it's simply timing out. A pure CORS error usually returns quickly with a "blocked by CORS" message. A 10-second or more delay suggests the server is not responding at all.  
-
----
-
-### 8. Steps to Systematically Debug On Railway
+### 5. Steps to Systematically Debug On Railway
 
 1. **Check Railway Logs**: 
    - Do you see errors like "`AttributeError: 'FastAPI' object has no attribute 'websocket'`" or "`No route found for GET /api/cors-test`"?  
@@ -571,7 +514,7 @@ That means your front-end waited 10 seconds, but the server never responded. Pot
 
 ---
 
-### 9. Potential Quick Fixes
+### 6. Potential Quick Fixes
 
 - **Ensure your production `Procfile` (or Docker CMD)** is launching your app with the CORS + WebSocket code loaded. For example:
   ```
@@ -593,6 +536,52 @@ That means your front-end waited 10 seconds, but the server never responded. Pot
   ```
 
 - **Double-check** the route `@app.websocket("/ws")` is actually declared. And your Docker or server logs that it's listening for websockets.
+
+---
+
+### 7. Eliminate "CORS Proxy" Attempts in Production
+
+Your logs mention `corsProxy.js` or "fetchThroughProxy." This suggests your code tries to do:
+
+1. **Direct call** to `scare-unified-dash-production.up.railway.app`.  
+2. If it fails, it tries `corsproxy.io`, `https://cors-anywhere.herokuapp.com/`, etc.
+
+Those proxies might block your domain or require manual activation. **Remove** that fallback in production. The correct approach is for your server to return the proper CORS headers so no proxy is necessary.
+
+---
+
+### 8. Watch Out for Timeouts
+
+You see:
+
+```
+Error fetching campaign data: AxiosError 
+message: 'timeout of 10000ms exceeded', code: 'ECONNABORTED'
+```
+That means your front-end waited 10 seconds, but the server never responded. Potential reasons:
+
+1. **Your server never got the request** (maybe the route doesn't exist, or your server is not truly listening).  
+2. **Your server's code is throwing an error** or is stuck. Check logs on Railway for Python or Node tracebacks.  
+3. **Network** or DNS issues. But less likely if the domain is correct.
+
+**Action**:
+- Lower your suspicion about CORS itself if it's simply timing out. A pure CORS error usually returns quickly with a "blocked by CORS" message. A 10-second or more delay suggests the server is not responding at all.  
+
+---
+
+### 9. Steps to Systematically Debug On Railway
+
+1. **Check Railway Logs**: 
+   - Do you see errors like "`AttributeError: 'FastAPI' object has no attribute 'websocket'`" or "`No route found for GET /api/cors-test`"?  
+2. **Hit your API from a direct tool** (like curl or Postman) with the production domain.  
+3. **Hit the "/docs" (if using FastAPI)** or "/openapi.json" in production. If that 404s, your app might not be running the same code.  
+4. **Temporarily** remove all your "corsProxy" code in the front-end so you only do:
+   ```js
+   axios.get("https://scare-unified-dash-production.up.railway.app/api/campaigns/metrics")
+       .then(res => console.log(res.data))
+       .catch(err => console.error(err));
+   ```
+   Then watch the network tab and see if it fails with a "blocked by CORS" or if it times out or returns 404/500.
 
 ---
 
@@ -719,6 +708,32 @@ The backend service was still returning a 502 Bad Gateway error, indicating that
 - If the PORT environment variable is not set, it defaults to 5000
 - The application binds to 0.0.0.0 to ensure it's accessible externally
 - Added more logging to help diagnose any issues
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application starts up correctly
+- Test the backend endpoints to ensure they're accessible
+
+### March 21, 2025 (Update): Created Dedicated Entry Point
+
+#### Problem:
+The backend service was still returning a 502 Bad Gateway error, indicating that the service was not running correctly.
+
+#### Investigation:
+1. The issue might be related to how the application is started in Railway
+2. The current Procfile was using a complex command with shell variables
+3. This could cause issues with how Railway interprets the command
+
+#### Solution:
+1. Created a dedicated entry point script (app.py) for the application
+2. Simplified the Procfile to use this new entry point
+3. Added more debug information to help diagnose issues
+
+#### Implementation Details:
+- The new app.py script properly handles the PORT environment variable
+- It prints out all environment variables (with sensitive information redacted) for debugging
+- The Procfile now uses a simple command to start the application
+- This approach should be more reliable and easier to debug
 
 #### Next Steps:
 - Deploy these changes to Railway
