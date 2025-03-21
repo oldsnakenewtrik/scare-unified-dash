@@ -412,7 +412,7 @@ function CampaignMapping() {
                             <TableCell>{mapping.source_system}</TableCell>
                             <TableCell>{mapping.pretty_source || mapping.source_system}</TableCell>
                             <TableCell>{mapping.network || 'Unknown'}</TableCell>
-                            <TableCell>{mapping.pretty_network || mapping.network || 'Unknown'}</TableCell>
+                            <TableCell>{mapping.pretty_network || 'Unknown'}</TableCell>
                             <TableCell align="right">
                               <Button 
                                 variant="outlined" 

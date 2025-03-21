@@ -1029,6 +1029,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     public.sm_campaign_name_mapping m ON 
                     CAST(g.campaign_id AS VARCHAR) = m.external_campaign_id 
                     AND m.source_system = 'Google Ads'
+                    AND m.is_active = TRUE
                 WHERE 
                     m.id IS NULL
             """
@@ -1061,6 +1062,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     public.sm_campaign_name_mapping m ON 
                     CAST(b.campaign_id AS VARCHAR) = m.external_campaign_id 
                     AND m.source_system = 'Bing Ads'
+                    AND m.is_active = TRUE
                 WHERE 
                     m.id IS NULL
             """
@@ -1093,6 +1095,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     public.sm_campaign_name_mapping mm ON 
                     CAST(m.campaign_id AS VARCHAR) = mm.external_campaign_id 
                     AND mm.source_system = 'Matomo'
+                    AND mm.is_active = TRUE
                 WHERE 
                     mm.id IS NULL
             """
@@ -1125,6 +1128,7 @@ def get_unmapped_campaigns(db=Depends(get_db)):
                     public.sm_campaign_name_mapping m ON 
                     CAST(r.campaign_id AS VARCHAR) = m.external_campaign_id 
                     AND m.source_system = 'RedTrack'
+                    AND m.is_active = TRUE
                 WHERE 
                     m.id IS NULL
             """
