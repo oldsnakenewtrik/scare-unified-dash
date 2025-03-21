@@ -40,7 +40,8 @@ origins = [
     "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
     "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
     "http://localhost:3000",  # Local frontend development
-    "http://localhost:5000"   # Local backend development
+    "http://localhost:5000",   # Local backend development
+    "*"  # Allow all origins (will be overridden by specific origin in response)
 ]
 
 # Add CORS middleware to the proxy app
@@ -68,27 +69,28 @@ async def log_requests(request: Request, call_next):
         
         # Add CORS headers to all responses
         origin = request.headers.get("origin")
-        if origin and origin in origins:
+        if origin:
+            # If there's an origin header, echo it back
             response.headers["Access-Control-Allow-Origin"] = origin
         else:
-            # For preflight requests or when origin is not in the allowed list
-            # We'll still set a default origin to help with debugging
-            response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
+            # For requests without an origin header
+            response.headers["Access-Control-Allow-Origin"] = "*"
             
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Origin, Accept"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         
         logger.info(f"Response: {response.status_code}")
+        logger.info(f"CORS headers set: {response.headers.get('Access-Control-Allow-Origin')}")
         return response
     except Exception as e:
         logger.error(f"Error processing request: {e}")
         
         # Return a generic error response
         response = Response(content=str(e), status_code=500)
-        response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Origin, Accept"
         return response
 
 # Add a health check endpoint
@@ -115,16 +117,17 @@ async def options_handler(request: Request, path: str):
     # Return an empty response with CORS headers
     response = Response()
     origin = request.headers.get("origin")
-    if origin and origin in origins:
+    if origin:
+        # If there's an origin header, echo it back
         response.headers["Access-Control-Allow-Origin"] = origin
     else:
-        # For preflight requests or when origin is not in the allowed list
-        # We'll still set a default origin to help with debugging
-        response.headers["Access-Control-Allow-Origin"] = "https://front-production-f6e6.up.railway.app"
+        # For requests without an origin header
+        response.headers["Access-Control-Allow-Origin"] = "*"
         
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Origin, Accept"
     response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Max-Age"] = "86400"  # Cache preflight response for 24 hours
     return response
 
 # Entry point for running the proxy directly

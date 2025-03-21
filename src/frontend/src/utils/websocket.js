@@ -25,171 +25,184 @@ class WebSocketClient {
     this.socket = null;
     this.isConnected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectTimeout = null;
-    this.listeners = {
-      message: [],
-      open: [],
-      close: [],
-      error: []
-    };
+    this.maxReconnectAttempts = 10;
+    this.reconnectDelay = 1000; // Start with 1 second delay
+    this.listeners = [];
+    this.messageQueue = [];
+    this.pingInterval = null;
+    this.url = getWebSocketUrl();
+    
+    // Bind methods to this
+    this.connect = this.connect.bind(this);
+    this.reconnect = this.reconnect.bind(this);
+    this.disconnect = this.disconnect.bind(this);
+    this.send = this.send.bind(this);
+    this.addListener = this.addListener.bind(this);
+    this.removeListener = this.removeListener.bind(this);
+    
+    // Connect immediately
+    this.connect();
   }
-
-  /**
-   * Connect to the WebSocket server
-   * @returns {Promise} Resolves when connected, rejects if connection fails
-   */
+  
   connect() {
-    return new Promise((resolve, reject) => {
-      if (this.isConnected) {
-        resolve();
-        return;
-      }
-
-      try {
-        const wsUrl = getWebSocketUrl();
-        console.log(`Connecting to WebSocket at ${wsUrl}`);
-        
-        this.socket = new WebSocket(wsUrl);
-        
-        this.socket.onopen = () => {
-          console.log('WebSocket connection established');
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this._notifyListeners('open');
-          resolve();
-        };
-        
-        this.socket.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            this._notifyListeners('message', data);
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
-            this._notifyListeners('error', { type: 'parse_error', error });
-          }
-        };
-        
-        this.socket.onclose = (event) => {
-          console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
-          this.isConnected = false;
-          this._notifyListeners('close', event);
-          
-          // Attempt to reconnect if not a normal closure
-          if (event.code !== 1000 && event.code !== 1001) {
-            this._attemptReconnect();
-          }
-        };
-        
-        this.socket.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          this._notifyListeners('error', error);
-          reject(error);
-        };
-      } catch (error) {
-        console.error('Error creating WebSocket connection:', error);
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * Disconnect from the WebSocket server
-   */
-  disconnect() {
-    if (this.socket && this.isConnected) {
-      this.socket.close(1000, 'Normal closure');
-      this.isConnected = false;
+    if (this.socket) {
+      // Close any existing connection
+      this.disconnect();
     }
     
-    // Clear any pending reconnect attempts
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
-  }
-
-  /**
-   * Send a message to the WebSocket server
-   * @param {Object} data Data to send
-   * @returns {boolean} True if sent successfully, false otherwise
-   */
-  send(data) {
-    if (!this.isConnected) {
-      console.error('Cannot send message: WebSocket is not connected');
-      return false;
-    }
+    console.log(`Connecting to WebSocket at ${this.url}`);
     
     try {
-      const message = typeof data === 'string' ? data : JSON.stringify(data);
-      this.socket.send(message);
-      return true;
+      this.socket = new WebSocket(this.url);
+      
+      this.socket.onopen = () => {
+        console.log('WebSocket connection established');
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.reconnectDelay = 1000;
+        
+        // Send any queued messages
+        while (this.messageQueue.length > 0) {
+          const message = this.messageQueue.shift();
+          this.send(message);
+        }
+        
+        // Notify listeners
+        this.notifyListeners({
+          type: 'connection_status',
+          status: 'connected'
+        });
+        
+        // Set up ping interval to keep connection alive
+        this.pingInterval = setInterval(() => {
+          this.send({
+            type: 'ping',
+            timestamp: new Date().toISOString()
+          });
+        }, 30000); // Send ping every 30 seconds
+      };
+      
+      this.socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket message received:', data);
+          
+          // Notify listeners
+          this.notifyListeners(data);
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+      
+      this.socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        this.notifyListeners({
+          type: 'connection_status',
+          status: 'error',
+          error
+        });
+      };
+      
+      this.socket.onclose = (event) => {
+        console.log('WebSocket connection closed:', event);
+        this.isConnected = false;
+        
+        // Clear ping interval
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
+        
+        // Notify listeners
+        this.notifyListeners({
+          type: 'connection_status',
+          status: 'disconnected',
+          event
+        });
+        
+        // Attempt to reconnect
+        this.reconnect();
+      };
     } catch (error) {
-      console.error('Error sending WebSocket message:', error);
-      return false;
+      console.error('Error creating WebSocket connection:', error);
+      this.reconnect();
     }
   }
-
-  /**
-   * Add an event listener
-   * @param {string} event Event type ('message', 'open', 'close', 'error')
-   * @param {Function} callback Callback function
-   */
-  addEventListener(event, callback) {
-    if (this.listeners[event]) {
-      this.listeners[event].push(callback);
-    }
-  }
-
-  /**
-   * Remove an event listener
-   * @param {string} event Event type
-   * @param {Function} callback Callback function to remove
-   */
-  removeEventListener(event, callback) {
-    if (this.listeners[event]) {
-      this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
-    }
-  }
-
-  /**
-   * Attempt to reconnect to the WebSocket server
-   * @private
-   */
-  _attemptReconnect() {
+  
+  reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error(`Maximum reconnect attempts (${this.maxReconnectAttempts}) reached`);
+      console.error('Maximum reconnection attempts reached');
       return;
     }
     
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    const delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1), 30000);
     
     console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     
-    this.reconnectTimeout = setTimeout(() => {
-      this.connect().catch(error => {
-        console.error('Reconnect attempt failed:', error);
-      });
+    setTimeout(() => {
+      this.connect();
     }, delay);
   }
-
-  /**
-   * Notify all listeners of an event
-   * @param {string} event Event type
-   * @param {*} data Event data
-   * @private
-   */
-  _notifyListeners(event, data) {
-    if (this.listeners[event]) {
-      this.listeners[event].forEach(callback => {
-        try {
-          callback(data);
-        } catch (error) {
-          console.error(`Error in ${event} listener:`, error);
-        }
-      });
+  
+  disconnect() {
+    if (this.socket) {
+      // Clear ping interval
+      if (this.pingInterval) {
+        clearInterval(this.pingInterval);
+        this.pingInterval = null;
+      }
+      
+      // Close the socket
+      if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING) {
+        this.socket.close();
+      }
+      
+      this.socket = null;
+      this.isConnected = false;
     }
+  }
+  
+  send(message) {
+    if (!message) return;
+    
+    const messageString = typeof message === 'string' ? message : JSON.stringify(message);
+    
+    if (this.isConnected && this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(messageString);
+    } else {
+      // Queue the message to be sent when connected
+      this.messageQueue.push(message);
+      
+      // If not connecting, try to connect
+      if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
+        this.connect();
+      }
+    }
+  }
+  
+  addListener(callback) {
+    if (typeof callback === 'function' && !this.listeners.includes(callback)) {
+      this.listeners.push(callback);
+    }
+    return () => this.removeListener(callback);
+  }
+  
+  removeListener(callback) {
+    const index = this.listeners.indexOf(callback);
+    if (index !== -1) {
+      this.listeners.splice(index, 1);
+    }
+  }
+  
+  notifyListeners(data) {
+    this.listeners.forEach(listener => {
+      try {
+        listener(data);
+      } catch (error) {
+        console.error('Error in WebSocket listener:', error);
+      }
+    });
   }
 }
 
