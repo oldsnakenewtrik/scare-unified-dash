@@ -49,35 +49,26 @@ app = FastAPI(title="SCARE Unified Metrics API")
 print("=====================================================")
 print("INITIALIZING FASTAPI APP")
 print("=====================================================")
-print("Python version:", sys.version)
-print("Current working directory:", os.getcwd())
-print("PYTHONPATH:", os.environ.get("PYTHONPATH", "Not set"))
 
-# For production, specify all allowed origins
+# Define allowed origins
 origins = [
-    "https://front-production-f6e6.up.railway.app",  # Production frontend
-    "http://localhost:3000",                         # Development frontend
-    "http://127.0.0.1:3000",                         # Alternative local development
-    "http://localhost:8000",                         # Local API testing
-    "http://127.0.0.1:8000",                         # Alternative local API
-    "*",                                             # Allow all origins as fallback
+    "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
+    "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
+    "http://localhost:3000",  # Local frontend development
+    "http://localhost:5000"   # Local backend development
 ]
 
-print(f"Configuring CORS middleware with origins: {origins}")
-
-# Make sure CORS middleware is first in the list
+# Add CORS middleware directly to the main app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=3600,
 )
-print("CORS middleware configured successfully")
 
-# Custom middleware to ensure CORS headers are present on every response
+# Add middleware to log all requests and add CORS headers
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
     origin = request.headers.get("origin", "")
@@ -98,7 +89,7 @@ async def add_cors_headers(request, call_next):
                 response.headers["access-control-allow-origin"] = "*"
                 
             response.headers["access-control-allow-credentials"] = "true"
-            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
             response.headers["access-control-allow-headers"] = "*"
             response.headers["access-control-expose-headers"] = "*"
         
@@ -115,7 +106,7 @@ async def add_cors_headers(request, call_next):
             resp.headers["access-control-allow-origin"] = "*"
             
         resp.headers["access-control-allow-credentials"] = "true"
-        resp.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        resp.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         resp.headers["access-control-allow-headers"] = "*"
         resp.headers["access-control-expose-headers"] = "*"
         
@@ -426,25 +417,29 @@ def health_check(db=Depends(get_db)):
     return health_status
 
 # Health check endpoint to test CORS headers
-@app.get("/api/health")
-def health_check():
-    """Health check endpoint"""
-    return {"status": "ok", "cors": "enabled"}
-
-# Simple CORS test endpoint to verify headers
-@app.get("/cors-test")
-def test_cors():
+@app.get("/api/cors-test")
+async def test_cors():
     """
     Test endpoint to verify CORS configuration
     Returns details about the CORS configuration to help with debugging
     """
     return {
-        "status": "ok",
-        "cors_enabled": True,
-        "origins_allowed": origins,
-        "middleware_configured": True,
-        "server_time": datetime.datetime.now().isoformat(),
-        "environment": os.environ.get("ENVIRONMENT", "unknown")
+        "message": "CORS is working correctly!",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "status": "success"
+    }
+
+# Simple CORS test endpoint to verify headers
+@app.get("/api/cors-test")
+async def test_cors():
+    """
+    Test endpoint to verify CORS configuration
+    Returns details about the CORS configuration to help with debugging
+    """
+    return {
+        "message": "CORS is working correctly!",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "status": "success"
     }
 
 # API endpoints

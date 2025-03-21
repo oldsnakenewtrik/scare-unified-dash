@@ -1,6 +1,6 @@
 /**
- * CORS Proxy utility to bypass CORS issues with the API
- * This is a temporary solution until the backend CORS issues are resolved
+ * Direct API utility for the SCARE Unified Dashboard
+ * This makes direct API calls to the backend
  */
 import axios from 'axios';
 
@@ -19,15 +19,8 @@ const getApiBaseUrl = () => {
 const API_BASE_URL = getApiBaseUrl();
 console.log('Using API base URL:', API_BASE_URL);
 
-// Public CORS proxies - we'll try these in order
-const CORS_PROXIES = [
-  'https://corsproxy.io/?',
-  'https://cors-anywhere.herokuapp.com/',
-  'https://cors-proxy.htmldriven.com/?url=',
-];
-
 /**
- * Make a request through a CORS proxy to bypass CORS restrictions
+ * Make a direct API request
  * @param {string} method HTTP method (GET, POST, PUT, DELETE)
  * @param {string} endpoint API endpoint (e.g., '/api/campaigns')
  * @param {Object} params URL parameters for GET requests
@@ -39,9 +32,8 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     ? `${API_BASE_URL}${endpoint}` 
     : `${API_BASE_URL}/${endpoint}`;
     
-  // First try the direct API call (in case CORS is fixed)
   try {
-    console.log(`Attempting direct API call to ${url}`);
+    console.log(`Making direct API call to ${url}`);
     const response = await axios({
       method: method,
       url: url,
@@ -53,110 +45,60 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Origin': window.location.origin
-      }
+      },
+      // Increase timeout for slow connections
+      timeout: 10000
     });
     console.log('Direct API call succeeded');
     return response;
   } catch (error) {
-    // If it's not a CORS error, or there's a different issue, throw the original error
-    if (!error.message?.includes('Network Error') && !error.message?.includes('CORS')) {
-      console.error('Direct API call failed with non-CORS error:', error);
-      throw error;
-    }
-    
-    console.warn('Direct API call failed due to CORS, trying proxies');
-    
-    // Try each CORS proxy in order
-    for (let i = 0; i < CORS_PROXIES.length; i++) {
-      const proxy = CORS_PROXIES[i];
-      try {
-        console.log(`Trying CORS proxy ${i + 1}: ${proxy}`);
-        
-        const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
-        const queryString = new URLSearchParams(params).toString();
-        const fullUrl = queryString ? `${proxyUrl}${proxyUrl.includes('?') ? '&' : '?'}${queryString}` : proxyUrl;
-        
-        const response = await axios({
-          method: method,
-          url: fullUrl,
-          data: data,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          }
-        });
-        
-        console.log(`CORS proxy ${i + 1} succeeded`);
-        return response;
-      } catch (proxyError) {
-        console.error(`CORS proxy ${i + 1} failed:`, proxyError);
-        // Continue to the next proxy
-      }
-    }
-    
-    // If all proxies fail, try a final option: jsonp-cors-proxy
-    try {
-      console.log('Trying jsonp-cors-proxy as last resort');
-      const response = await axios.get('https://jsonp-cors-proxy.vercel.app/api/proxy', {
-        params: {
-          url: url,
-          method: method,
-          params: JSON.stringify(params),
-          data: JSON.stringify(data)
-        }
-      });
-      console.log('jsonp-cors-proxy succeeded');
-      return { data: response.data };
-    } catch (finalError) {
-      console.error('All proxy attempts failed:', finalError);
-      throw new Error('Failed to connect to API through any available proxy');
-    }
+    console.error('API call failed:', error);
+    throw error;
   }
 };
 
 /**
- * Make a GET request through a CORS proxy
+ * Make a GET request
  * @param {string} endpoint API endpoint
  * @param {Object} params URL parameters
  * @returns {Promise} Axios promise with the response data
  */
 export const getWithProxy = (endpoint, params = {}) => {
-  return fetchThroughProxy('GET', endpoint, params);
+  return fetchThroughProxy('get', endpoint, params);
 };
 
 /**
- * Make a POST request through a CORS proxy
+ * Make a POST request
  * @param {string} endpoint API endpoint
  * @param {Object} data Request body
  * @returns {Promise} Axios promise with the response data
  */
 export const postWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy('POST', endpoint, {}, data);
+  return fetchThroughProxy('post', endpoint, {}, data);
 };
 
 /**
- * Make a PUT request through a CORS proxy
+ * Make a PUT request
  * @param {string} endpoint API endpoint
  * @param {Object} data Request body
  * @returns {Promise} Axios promise with the response data
  */
 export const putWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy('PUT', endpoint, {}, data);
+  return fetchThroughProxy('put', endpoint, {}, data);
 };
 
 /**
- * Make a DELETE request through a CORS proxy
+ * Make a DELETE request
  * @param {string} endpoint API endpoint
  * @returns {Promise} Axios promise with the response data
  */
 export const deleteWithProxy = (endpoint) => {
-  return fetchThroughProxy('DELETE', endpoint);
+  return fetchThroughProxy('delete', endpoint);
 };
 
 export default {
   get: getWithProxy,
   post: postWithProxy,
   put: putWithProxy,
-  delete: deleteWithProxy
+  delete: deleteWithProxy,
 };

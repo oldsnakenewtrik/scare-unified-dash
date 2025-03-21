@@ -35,12 +35,12 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import corsProxy from './utils/corsProxy';
-import CorsTest from './utils/CorsTest';
 
 // Import components
 import CampaignMapping from './components/CampaignMapping';
 import HierarchicalDashboard from './components/HierarchicalDashboard';
 import WebSocketTest from './components/WebSocketTest';
+import CorsTest from './components/CorsTest';
 
 // Create a theme
 const theme = createTheme({
@@ -364,6 +364,14 @@ function App() {
             >
               WebSocket Test
             </Button>
+            <Button 
+              color="inherit" 
+              component={Link} 
+              to="/cors-test" 
+              onClick={() => handleNavigate('cors-test')}
+            >
+              CORS Test
+            </Button>
             <IconButton
               color="inherit"
               onClick={handleOpenSettings}
@@ -521,12 +529,14 @@ function App() {
                 </TableContainer>
               </Paper>
             </>
-          ) : currentView === 'campaign-mapping' ? (
-            <CampaignMapping />
           ) : currentView === 'hierarchy' ? (
             <HierarchicalDashboard />
+          ) : currentView === 'campaign-mapping' ? (
+            <CampaignMapping />
           ) : currentView === 'websocket-test' ? (
             <WebSocketTest />
+          ) : currentView === 'cors-test' ? (
+            <CorsTest />
           ) : currentView === 'settings/campaign-mapping?refresh=true' ? (
             <Button 
               variant="contained" 

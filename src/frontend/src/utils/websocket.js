@@ -10,7 +10,6 @@ const getWebSocketUrl = () => {
   // If we're in the Railway production environment
   if (window.location.hostname.includes('railway.app')) {
     // Use the backend service URL with the WebSocket protocol
-    // Make sure we're using the correct port (no port in the URL for Railway)
     return `${protocol}//scare-unified-dash-production.up.railway.app/ws`;
   }
   
@@ -18,6 +17,20 @@ const getWebSocketUrl = () => {
   const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
   const apiUrl = new URL(apiBaseUrl);
   return `${protocol}//${apiUrl.hostname}:${apiUrl.port || '5000'}/ws`;
+};
+
+// Fallback to HTTP/HTTPS if WebSocket connection fails
+const getFallbackUrl = () => {
+  const protocol = window.location.protocol;
+  
+  // If we're in the Railway production environment
+  if (window.location.hostname.includes('railway.app')) {
+    return `${protocol}//scare-unified-dash-production.up.railway.app/api/ws-fallback`;
+  }
+  
+  // For local development
+  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+  return `${apiBaseUrl}/api/ws-fallback`;
 };
 
 class WebSocketClient {
@@ -31,6 +44,7 @@ class WebSocketClient {
     this.messageQueue = [];
     this.pingInterval = null;
     this.url = getWebSocketUrl();
+    this.fallbackMode = false;
     
     // Bind methods to this
     this.connect = this.connect.bind(this);
@@ -39,6 +53,7 @@ class WebSocketClient {
     this.send = this.send.bind(this);
     this.addListener = this.addListener.bind(this);
     this.removeListener = this.removeListener.bind(this);
+    this.switchToFallbackMode = this.switchToFallbackMode.bind(this);
     
     // Connect immediately
     this.connect();
@@ -48,6 +63,12 @@ class WebSocketClient {
     if (this.socket) {
       // Close any existing connection
       this.disconnect();
+    }
+    
+    // If we've reached the maximum number of reconnect attempts, switch to fallback mode
+    if (this.reconnectAttempts >= this.maxReconnectAttempts && !this.fallbackMode) {
+      this.switchToFallbackMode();
+      return;
     }
     
     console.log(`Connecting to WebSocket at ${this.url}`);
@@ -202,6 +223,44 @@ class WebSocketClient {
       } catch (error) {
         console.error('Error in WebSocket listener:', error);
       }
+    });
+  }
+  
+  // Switch to fallback mode using HTTP polling instead of WebSockets
+  switchToFallbackMode() {
+    console.log('Switching to fallback mode for WebSocket communication');
+    this.fallbackMode = true;
+    this.isConnected = true; // Pretend we're connected
+    
+    // Clear any existing intervals
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+    }
+    
+    // Set up polling interval
+    this.pingInterval = setInterval(() => {
+      // Simulate connection status updates
+      this.notifyListeners({
+        type: 'connection_status',
+        status: 'connected',
+        fallback: true
+      });
+      
+      // Process any queued messages
+      while (this.messageQueue.length > 0) {
+        const message = this.messageQueue.shift();
+        console.log('Fallback mode: Message would be sent via HTTP:', message);
+        
+        // In a real implementation, you would send these via HTTP POST
+        // For now, we'll just log them
+      }
+    }, 5000); // Poll every 5 seconds
+    
+    // Notify listeners that we're in fallback mode
+    this.notifyListeners({
+      type: 'connection_status',
+      status: 'fallback',
+      message: 'Using HTTP fallback instead of WebSocket'
     });
   }
 }

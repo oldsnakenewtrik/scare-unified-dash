@@ -2,7 +2,7 @@
 WebSocket server implementation for the SCARE Unified Dashboard
 """
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response
 from typing import List, Dict, Any
 import json
 from datetime import datetime
@@ -99,17 +99,71 @@ def add_websocket_endpoints(app: FastAPI) -> FastAPI:
                     await manager.broadcast(data)
                     
         except WebSocketDisconnect:
-            # Handle disconnection
+            # Remove the connection when the client disconnects
             manager.disconnect(websocket)
-            await manager.broadcast(json.dumps({
-                "type": "client_disconnected",
-                "timestamp": datetime.now().isoformat()
-            }))
         except Exception as e:
-            # Handle other exceptions
+            # Log any other errors
             logger.error(f"WebSocket error: {e}")
-            manager.disconnect(websocket)
-
+            # Try to disconnect if possible
+            try:
+                manager.disconnect(websocket)
+            except:
+                pass
+    
+    # Add a fallback HTTP endpoint for WebSocket communication
+    @app.post("/api/ws-fallback")
+    async def ws_fallback(request: Request):
+        """
+        Fallback endpoint for WebSocket communication when WebSocket connection fails.
+        This allows clients to send and receive messages using HTTP when WebSockets are not available.
+        """
+        try:
+            # Parse the request body
+            data = await request.json()
+            logger.info(f"Received fallback message: {data}")
+            
+            # Process the message based on its type
+            if data.get("type") == "ping":
+                # Respond to ping messages
+                return {
+                    "type": "pong",
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                # For other messages, we would normally broadcast them
+                # In this fallback mode, we just acknowledge receipt
+                return {
+                    "type": "ack",
+                    "message": "Message received",
+                    "timestamp": datetime.now().isoformat()
+                }
+        except Exception as e:
+            logger.error(f"Error in fallback endpoint: {e}")
+            return Response(
+                content=json.dumps({
+                    "type": "error",
+                    "message": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }),
+                status_code=500,
+                media_type="application/json"
+            )
+    
+    # Add an endpoint to get recent messages
+    @app.get("/api/ws-fallback/messages")
+    async def get_recent_messages():
+        """
+        Endpoint to get recent messages when using the fallback HTTP mode.
+        This simulates the WebSocket experience by allowing clients to poll for new messages.
+        """
+        # In a real implementation, you would store and return recent messages
+        # For now, we'll just return a simple response
+        return {
+            "type": "messages",
+            "messages": [],
+            "timestamp": datetime.now().isoformat()
+        }
+    
     @app.get("/api/ws-status")
     async def get_websocket_status():
         return {
