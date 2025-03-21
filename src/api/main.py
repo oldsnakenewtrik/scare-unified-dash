@@ -16,6 +16,7 @@ import traceback
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Force the port to be 5000 to match Railway configuration
 os.environ["PORT"] = "5000"
@@ -599,6 +600,17 @@ def health_check(db=Depends(get_db)):
 
 # Health check endpoint to test CORS headers
 @app.get("/api/cors-test")
+async def cors_test_for_healthcheck():
+    """
+    Test endpoint specifically for Railway healthcheck
+    """
+    return {
+        "message": "CORS is working correctly!",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "status": "success"
+    }
+
+@app.get("/api/test-cors")
 async def test_cors():
     """
     Test endpoint to verify CORS configuration
