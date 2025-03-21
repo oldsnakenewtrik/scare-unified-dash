@@ -45,6 +45,11 @@ fi
 echo "Initializing database..."
 python ./src/api/db_init.py
 
+# Run post-deployment script to ensure views are created
+echo "Running post-deployment tasks..."
+python ./post_deploy.py &
+POST_DEPLOY_PID=$!
+
 # Set default port if not provided
 export PORT="${PORT:-5000}"
 echo "Using PORT: $PORT"

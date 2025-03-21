@@ -58,6 +58,9 @@ def init_database():
             # Add network column to all fact tables
             add_network_column(conn)
             
+            # Create or update views
+            create_or_update_views(conn)
+            
             # Insert sample data - DISABLED TO AVOID CONFUSION WITH REAL DATA
             # insert_sample_data(conn)
             
@@ -296,6 +299,169 @@ def add_network_column(conn):
                     logger.info(f"network column already exists in {table}")
     except Exception as e:
         logger.warning(f"Error adding network column: {str(e)}")
+        # Continue execution even if this fails
+
+def create_or_update_views(conn):
+    """Create or update views for campaign performance metrics"""
+    try:
+        logger.info("Creating or updating database views")
+        
+        # Create unified ads metrics view
+        conn.execute(text("""
+        CREATE OR REPLACE VIEW public.sm_unified_ads_metrics AS
+        SELECT 
+            'google_ads' as platform,
+            COALESCE(g.network, 'Unknown') as network,
+            g.date,
+            g.campaign_id,
+            COALESCE(m.pretty_campaign_name, g.campaign_name) as campaign_name,
+            g.campaign_name as original_campaign_name,
+            COALESCE(m.pretty_network, 'Unknown') as pretty_network,
+            COALESCE(m.pretty_source, 'Google Ads') as pretty_source,
+            COALESCE(m.campaign_category, 'Uncategorized') as campaign_category,
+            COALESCE(m.campaign_type, 'Uncategorized') as campaign_type,
+            g.impressions,
+            g.clicks,
+            g.cost,
+            g.conversions,
+            CASE 
+                WHEN g.impressions > 0 THEN g.clicks::FLOAT / g.impressions 
+                ELSE 0 
+            END as ctr,
+            CASE 
+                WHEN g.clicks > 0 THEN g.conversions::FLOAT / g.clicks 
+                ELSE 0 
+            END as conversion_rate,
+            CASE 
+                WHEN g.conversions > 0 THEN g.cost / g.conversions 
+                ELSE 0 
+            END as cost_per_conversion
+        FROM 
+            public.sm_fact_google_ads g
+        LEFT JOIN 
+            public.sm_campaign_name_mapping m ON m.source_system = 'Google Ads' 
+                AND m.external_campaign_id = g.campaign_id::VARCHAR
+                AND m.is_active = TRUE
+
+        UNION ALL
+
+        SELECT 
+            'bing_ads' as platform,
+            COALESCE(b.network, 'Unknown') as network,
+            b.date,
+            b.campaign_id,
+            COALESCE(m.pretty_campaign_name, b.campaign_name) as campaign_name,
+            b.campaign_name as original_campaign_name,
+            COALESCE(m.pretty_network, 'Unknown') as pretty_network,
+            COALESCE(m.pretty_source, 'Bing Ads') as pretty_source,
+            COALESCE(m.campaign_category, 'Uncategorized') as campaign_category,
+            COALESCE(m.campaign_type, 'Uncategorized') as campaign_type,
+            b.impressions,
+            b.clicks,
+            b.cost,
+            b.conversions,
+            CASE 
+                WHEN b.impressions > 0 THEN b.clicks::FLOAT / b.impressions 
+                ELSE 0 
+            END as ctr,
+            CASE 
+                WHEN b.clicks > 0 THEN b.conversions::FLOAT / b.clicks 
+                ELSE 0 
+            END as conversion_rate,
+            CASE 
+                WHEN b.conversions > 0 THEN b.cost / b.conversions 
+                ELSE 0 
+            END as cost_per_conversion
+        FROM 
+            public.sm_fact_bing_ads b
+        LEFT JOIN 
+            public.sm_campaign_name_mapping m ON m.source_system = 'Bing Ads' 
+                AND m.external_campaign_id = b.campaign_id::VARCHAR
+                AND m.is_active = TRUE
+
+        UNION ALL
+
+        SELECT 
+            'redtrack' as platform,
+            COALESCE(r.network, 'Affiliate') as network,
+            r.date,
+            r.campaign_id,
+            COALESCE(m.pretty_campaign_name, r.campaign_name) as campaign_name,
+            r.campaign_name as original_campaign_name,
+            COALESCE(m.pretty_network, 'Unknown') as pretty_network,
+            COALESCE(m.pretty_source, 'RedTrack') as pretty_source,
+            COALESCE(m.campaign_category, 'Uncategorized') as campaign_category,
+            COALESCE(m.campaign_type, 'Uncategorized') as campaign_type,
+            0 as impressions,
+            r.clicks,
+            r.cost,
+            r.conversions,
+            0 as ctr,
+            CASE 
+                WHEN r.clicks > 0 THEN r.conversions::FLOAT / r.clicks 
+                ELSE 0 
+            END as conversion_rate,
+            CASE 
+                WHEN r.conversions > 0 THEN r.cost / r.conversions 
+                ELSE 0 
+            END as cost_per_conversion
+        FROM 
+            public.sm_fact_redtrack r
+        LEFT JOIN 
+            public.sm_campaign_name_mapping m ON m.source_system = 'RedTrack' 
+                AND m.external_campaign_id = r.campaign_id::VARCHAR
+                AND m.is_active = TRUE;
+        """))
+        logger.info("sm_unified_ads_metrics view created or updated")
+        
+        # Create campaign performance view
+        conn.execute(text("""
+        CREATE OR REPLACE VIEW public.sm_campaign_performance AS
+        SELECT
+            platform,
+            network,
+            campaign_id,
+            campaign_name,
+            original_campaign_name,
+            pretty_network,
+            pretty_source,
+            campaign_category,
+            campaign_type,
+            date,
+            SUM(impressions) as impressions,
+            SUM(clicks) as clicks,
+            SUM(cost) as cost,
+            SUM(conversions) as conversions,
+            CASE 
+                WHEN SUM(impressions) > 0 THEN SUM(clicks)::FLOAT / SUM(impressions) 
+                ELSE 0 
+            END as ctr,
+            CASE 
+                WHEN SUM(clicks) > 0 THEN SUM(conversions)::FLOAT / SUM(clicks) 
+                ELSE 0 
+            END as conversion_rate,
+            CASE 
+                WHEN SUM(conversions) > 0 THEN SUM(cost) / SUM(conversions) 
+                ELSE 0 
+            END as cost_per_conversion
+        FROM 
+            public.sm_unified_ads_metrics
+        GROUP BY
+            platform,
+            network,
+            campaign_id,
+            campaign_name,
+            original_campaign_name,
+            pretty_network,
+            pretty_source,
+            campaign_category,
+            campaign_type,
+            date;
+        """))
+        logger.info("sm_campaign_performance view created or updated")
+        
+    except Exception as e:
+        logger.warning(f"Error creating or updating views: {str(e)}")
         # Continue execution even if this fails
 
 def insert_sample_data(conn):
