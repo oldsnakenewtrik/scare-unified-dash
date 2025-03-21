@@ -4,8 +4,20 @@
  */
 import axios from 'axios';
 
-// Original API URL (the one that's having CORS issues)
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+// Determine the API base URL based on the environment
+const getApiBaseUrl = () => {
+  // If we're in the Railway production environment
+  if (window.location.hostname.includes('railway.app')) {
+    // Use the same domain but with the backend service URL
+    return 'https://scare-unified-dash-production.up.railway.app';
+  }
+  
+  // For local development or other environments, use the environment variable or default
+  return process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+console.log('Using API base URL:', API_BASE_URL);
 
 // Public CORS proxies - we'll try these in order
 const CORS_PROXIES = [
@@ -23,14 +35,25 @@ const CORS_PROXIES = [
  * @returns {Promise} Axios promise with the response data
  */
 export const fetchThroughProxy = async (method, endpoint, params = {}, data = null) => {
+  const url = endpoint.startsWith('/') 
+    ? `${API_BASE_URL}${endpoint}` 
+    : `${API_BASE_URL}/${endpoint}`;
+    
   // First try the direct API call (in case CORS is fixed)
   try {
-    console.log(`Attempting direct API call to ${API_BASE_URL}${endpoint}`);
+    console.log(`Attempting direct API call to ${url}`);
     const response = await axios({
       method: method,
-      url: `${API_BASE_URL}${endpoint}`,
+      url: url,
       params: params,
       data: data,
+      // Add withCredentials to allow cookies to be sent
+      withCredentials: false,
+      // Add headers to help with CORS
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      }
     });
     console.log('Direct API call succeeded');
     return response;
@@ -49,7 +72,7 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       try {
         console.log(`Trying CORS proxy ${i + 1}: ${proxy}`);
         
-        const proxyUrl = `${proxy}${encodeURIComponent(`${API_BASE_URL}${endpoint}`)}`;
+        const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
         const queryString = new URLSearchParams(params).toString();
         const fullUrl = queryString ? `${proxyUrl}${proxyUrl.includes('?') ? '&' : '?'}${queryString}` : proxyUrl;
         
@@ -57,6 +80,10 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
           method: method,
           url: fullUrl,
           data: data,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          }
         });
         
         console.log(`CORS proxy ${i + 1} succeeded`);
@@ -72,7 +99,7 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       console.log('Trying jsonp-cors-proxy as last resort');
       const response = await axios.get('https://jsonp-cors-proxy.vercel.app/api/proxy', {
         params: {
-          url: `${API_BASE_URL}${endpoint}`,
+          url: url,
           method: method,
           params: JSON.stringify(params),
           data: JSON.stringify(data)

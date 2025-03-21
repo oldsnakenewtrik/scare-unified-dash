@@ -35,8 +35,14 @@ except ImportError:
 # Create a new FastAPI app that will wrap the main app
 app = FastAPI(title="CORS Proxy for SCARE Unified Dashboard API")
 
-# Configure CORS to allow any origin
-origins = ["*"]
+# Configure CORS to allow specific origins
+origins = [
+    "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
+    "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
+    "http://localhost:3000",  # Local frontend development
+    "http://localhost:5000",  # Local backend development
+    "*"  # Allow all origins as a fallback
+]
 
 # Add CORS middleware to the proxy app
 app.add_middleware(
@@ -53,14 +59,24 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     logger.info(f"Request: {request.method} {request.url.path}")
     
+    # Log the request origin for debugging
+    origin = request.headers.get("origin", "No origin")
+    logger.info(f"Request origin: {origin}")
+    
     try:
         # Process the request through the main app
         response = await call_next(request)
         
         # Add CORS headers to all responses
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        origin = request.headers.get("origin")
+        if origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
         
         logger.info(f"Response: {response.status_code}")
         return response
@@ -70,23 +86,42 @@ async def log_requests(request: Request, call_next):
         # Return a generic error response
         response = Response(content=str(e), status_code=500)
         response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
         return response
+
+# Add a health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+# Add WebSocket support
+try:
+    from src.api.websocket import add_websocket_endpoints
+    app = add_websocket_endpoints(app)
+    logger.info("WebSocket support added successfully")
+except ImportError as e:
+    logger.error(f"Failed to add WebSocket support: {e}")
 
 # Mount the main app
 app.mount("/", main_app)
 
 # Handle OPTIONS requests explicitly
 @app.options("/{path:path}")
-async def options_handler(path: str):
+async def options_handler(request: Request, path: str):
     logger.info(f"Handling OPTIONS request for /{path}")
     
     # Return an empty response with CORS headers
     response = Response()
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
 # Entry point for running the proxy directly

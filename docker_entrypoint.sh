@@ -37,9 +37,24 @@ fi
 echo "Initializing database..."
 python ./src/api/db_init.py
 
-# Start the API server
-echo "Starting web server with CORS proxy..."
-# Use a default port if PORT is not set or not a number
-PORT_NUMBER=${PORT:-8000}
-echo "Using port: $PORT_NUMBER"
-exec python -m uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port "$PORT_NUMBER"
+# Set default port if not provided
+export PORT="${PORT:-8000}"
+echo "Using PORT: $PORT"
+
+# Install dependencies if needed
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment..."
+    python -m venv venv
+fi
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install or upgrade dependencies
+echo "Installing dependencies..."
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Start the API server with WebSocket support
+echo "Starting web server with CORS proxy and WebSocket support..."
+exec uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port "$PORT" --log-level info --websockets ws
