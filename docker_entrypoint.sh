@@ -38,7 +38,7 @@ echo "Initializing database..."
 python ./src/api/db_init.py
 
 # Set default port if not provided
-export PORT="5000"
+export PORT="${PORT:-5000}"
 echo "Using PORT: $PORT"
 
 # Run port debug script
@@ -62,4 +62,4 @@ pip install -r requirements.txt
 # Start the API server with WebSocket support
 echo "Starting web server with CORS and WebSocket support..."
 echo "Using PORT: $PORT"
-exec uvicorn src.api.main:app --host 0.0.0.0 --port 5000 --log-level debug --ws-ping-interval 20 --ws-ping-timeout 30
+exec uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --log-level debug --ws-ping-interval 20 --ws-ping-timeout 30

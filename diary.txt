@@ -137,12 +137,12 @@ After deploying the CORS and WebSocket fixes, the application was still experien
 
 #### Investigation:
 1. The Railway settings showed the backend was configured to use port 5000
-2. The application was actually running on port 8000 (default in docker_entrypoint.sh)
+2. The application was actually running on port 8080 (default in docker_entrypoint.sh)
 3. This port mismatch was causing the "Bad Gateway" errors
 
 #### Solution:
 1. **Port Configuration Fix**:
-   - Updated the default port in docker_entrypoint.sh from 8000 to 5000 to match Railway settings
+   - Updated the default port in docker_entrypoint.sh from 8080 to 5000 to match Railway settings
    - Ensured the main.py file also uses the PORT environment variable with a fallback to 5000
    - Moved the catch-all route handler to the end of the file to avoid conflicts with API routes
 
@@ -263,6 +263,79 @@ The deployment was failing with the error: `NameError: name 'load_dotenv' is not
 - The `load_dotenv` function is now properly imported
 - Removed duplicate endpoint to avoid conflicts
 - Organized imports for better readability
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application starts up correctly
+- Test the backend endpoints to ensure they're accessible
+
+### March 21, 2025 (Update 6): Added Healthcheck Endpoint
+
+#### Problem:
+The Railway healthcheck was configured to use "/api/cors-test", but our endpoint was defined as "/api/test-cors"
+
+#### Investigation:
+1. The Railway healthcheck path was set to "/api/cors-test"
+2. Our endpoint was defined as "/api/test-cors"
+3. This mismatch could cause the healthcheck to fail
+
+#### Solution:
+1. Added a new endpoint specifically for the Railway healthcheck at "/api/cors-test"
+2. Kept the existing endpoint at "/api/test-cors" for backward compatibility
+3. Both endpoints return the same response
+
+#### Implementation Details:
+- The new endpoint is specifically designed for the Railway healthcheck
+- The existing endpoint is kept for backward compatibility
+- Both endpoints return the same response format
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application starts up correctly
+- Test both endpoints to ensure they're accessible
+
+### March 21, 2025 (Update 7): Fixed Missing BaseModel Import
+
+#### Problem:
+The deployment was failing with the error: `NameError: name 'BaseModel' is not defined`
+
+#### Investigation:
+1. When we reorganized the imports, we inadvertently removed the `BaseModel` import from pydantic
+2. This caused the application to fail when trying to define the `MetricsSummary` class
+
+#### Solution:
+1. Added the `from pydantic import BaseModel` import
+
+#### Implementation Details:
+- The `BaseModel` class is now properly imported from pydantic
+- This should allow the application to define the necessary data models
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application starts up correctly
+- Test the backend endpoints to ensure they're accessible
+
+### March 21, 2025 (Update 8): Fixed Port Configuration
+
+#### Problem:
+The backend service was still returning a 502 Bad Gateway error, indicating that the service was not running correctly.
+
+#### Investigation:
+1. The Procfile was using port 8000 as the default, but we were setting port 5000 in our code
+2. We were forcing the PORT environment variable to be 5000 in main.py, which could override the value set by Railway
+3. The docker_entrypoint.sh file was hardcoding the port to 5000
+
+#### Solution:
+1. Updated the Procfile to use port 5000 as the default instead of 8000
+2. Removed the line that forces the PORT to be 5000 in main.py
+3. Modified docker_entrypoint.sh to use the PORT environment variable instead of hardcoding it
+4. Updated the main function to properly use the PORT environment variable and ensure it's binding to 0.0.0.0
+
+#### Implementation Details:
+- The application now uses the PORT environment variable provided by Railway
+- If the PORT environment variable is not set, it defaults to 5000
+- The application binds to 0.0.0.0 to ensure it's accessible externally
+- Added more logging to help diagnose any issues
 
 #### Next Steps:
 - Deploy these changes to Railway
@@ -579,7 +652,7 @@ This error occurred because the application was trying to insert data into the `
 
 ---
 
-### March 21, 2025 (Update 6): Added Healthcheck Endpoint
+### March 21, 2025 (Update): Added Healthcheck Endpoint
 
 #### Problem:
 The Railway healthcheck was configured to use "/api/cors-test", but our endpoint was defined as "/api/test-cors"
@@ -604,7 +677,7 @@ The Railway healthcheck was configured to use "/api/cors-test", but our endpoint
 - Check the logs to ensure the application starts up correctly
 - Test both endpoints to ensure they're accessible
 
-### March 21, 2025 (Update 7): Fixed Missing BaseModel Import
+### March 21, 2025 (Update): Fixed Missing BaseModel Import
 
 #### Problem:
 The deployment was failing with the error: `NameError: name 'BaseModel' is not defined`
@@ -619,6 +692,33 @@ The deployment was failing with the error: `NameError: name 'BaseModel' is not d
 #### Implementation Details:
 - The `BaseModel` class is now properly imported from pydantic
 - This should allow the application to define the necessary data models
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application starts up correctly
+- Test the backend endpoints to ensure they're accessible
+
+### March 21, 2025 (Update): Fixed Port Configuration
+
+#### Problem:
+The backend service was still returning a 502 Bad Gateway error, indicating that the service was not running correctly.
+
+#### Investigation:
+1. The Procfile was using port 8000 as the default, but we were setting port 5000 in our code
+2. We were forcing the PORT environment variable to be 5000 in main.py, which could override the value set by Railway
+3. The docker_entrypoint.sh file was hardcoding the port to 5000
+
+#### Solution:
+1. Updated the Procfile to use port 5000 as the default instead of 8000
+2. Removed the line that forces the PORT to be 5000 in main.py
+3. Modified docker_entrypoint.sh to use the PORT environment variable instead of hardcoding it
+4. Updated the main function to properly use the PORT environment variable and ensure it's binding to 0.0.0.0
+
+#### Implementation Details:
+- The application now uses the PORT environment variable provided by Railway
+- If the PORT environment variable is not set, it defaults to 5000
+- The application binds to 0.0.0.0 to ensure it's accessible externally
+- Added more logging to help diagnose any issues
 
 #### Next Steps:
 - Deploy these changes to Railway

@@ -17,10 +17,6 @@ from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
-
-# Force the port to be 5000 to match Railway configuration
-os.environ["PORT"] = "5000"
-
 import asyncio
 import aiohttp
 
@@ -1470,6 +1466,7 @@ async def catch_all_routes(path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    # Use port 5000 to match Railway configuration
+    # Get port from environment variable or use 5000 as default
     port = int(os.environ.get("PORT", 5000))
+    print(f"Starting server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
