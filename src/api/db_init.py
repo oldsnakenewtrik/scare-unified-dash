@@ -325,15 +325,15 @@ def create_or_update_views(conn):
             g.cost,
             g.conversions,
             CASE 
-                WHEN g.impressions > 0 THEN g.clicks::FLOAT / g.impressions 
+                WHEN g.impressions > 0 THEN (g.clicks::numeric / g.impressions::numeric)
                 ELSE 0 
             END as ctr,
             CASE 
-                WHEN g.clicks > 0 THEN g.conversions::FLOAT / g.clicks 
+                WHEN g.clicks > 0 THEN (g.conversions::numeric / g.clicks::numeric)
                 ELSE 0 
             END as conversion_rate,
             CASE 
-                WHEN g.conversions > 0 THEN g.cost / g.conversions 
+                WHEN g.conversions > 0 THEN (g.cost::numeric / g.conversions::numeric)
                 ELSE 0 
             END as cost_per_conversion
         FROM 
@@ -361,15 +361,15 @@ def create_or_update_views(conn):
             b.cost,
             b.conversions,
             CASE 
-                WHEN b.impressions > 0 THEN b.clicks::FLOAT / b.impressions 
+                WHEN b.impressions > 0 THEN (b.clicks::numeric / b.impressions::numeric)
                 ELSE 0 
             END as ctr,
             CASE 
-                WHEN b.clicks > 0 THEN b.conversions::FLOAT / b.clicks 
+                WHEN b.clicks > 0 THEN (b.conversions::numeric / b.clicks::numeric)
                 ELSE 0 
             END as conversion_rate,
             CASE 
-                WHEN b.conversions > 0 THEN b.cost / b.conversions 
+                WHEN b.conversions > 0 THEN (b.cost::numeric / b.conversions::numeric)
                 ELSE 0 
             END as cost_per_conversion
         FROM 
@@ -398,11 +398,11 @@ def create_or_update_views(conn):
             r.conversions,
             0 as ctr,
             CASE 
-                WHEN r.clicks > 0 THEN r.conversions::FLOAT / r.clicks 
+                WHEN r.clicks > 0 THEN (r.conversions::numeric / r.clicks::numeric)
                 ELSE 0 
             END as conversion_rate,
             CASE 
-                WHEN r.conversions > 0 THEN r.cost / r.conversions 
+                WHEN r.conversions > 0 THEN (r.cost::numeric / r.conversions::numeric)
                 ELSE 0 
             END as cost_per_conversion
         FROM 
@@ -433,15 +433,15 @@ def create_or_update_views(conn):
             SUM(cost) as cost,
             SUM(conversions) as conversions,
             CASE 
-                WHEN SUM(impressions) > 0 THEN SUM(clicks)::FLOAT / SUM(impressions) 
+                WHEN SUM(impressions) > 0 THEN (SUM(clicks)::numeric / SUM(impressions)::numeric)
                 ELSE 0 
             END as ctr,
             CASE 
-                WHEN SUM(clicks) > 0 THEN SUM(conversions)::FLOAT / SUM(clicks) 
+                WHEN SUM(clicks) > 0 THEN (SUM(conversions)::numeric / SUM(clicks)::numeric) 
                 ELSE 0 
             END as conversion_rate,
             CASE 
-                WHEN SUM(conversions) > 0 THEN SUM(cost) / SUM(conversions) 
+                WHEN SUM(conversions) > 0 THEN (SUM(cost)::numeric / SUM(conversions)::numeric)
                 ELSE 0 
             END as cost_per_conversion
         FROM 
