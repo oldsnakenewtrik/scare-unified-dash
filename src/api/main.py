@@ -1185,6 +1185,7 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     network = :network,
                     pretty_network = :pretty_network,
                     pretty_source = :pretty_source,
+                    is_active = TRUE,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
                 RETURNING *
@@ -1214,7 +1215,8 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     network, 
                     display_order,
                     pretty_network,
-                    pretty_source
+                    pretty_source,
+                    is_active
                 )
                 VALUES (
                     :source_system, 
@@ -1226,7 +1228,8 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     :network, 
                     :display_order,
                     :pretty_network,
-                    :pretty_source
+                    :pretty_source,
+                    TRUE
                 )
                 ON CONFLICT (source_system, external_campaign_id)
                 DO UPDATE SET
@@ -1237,6 +1240,7 @@ def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
                     network = EXCLUDED.network,
                     pretty_network = EXCLUDED.pretty_network,
                     pretty_source = EXCLUDED.pretty_source,
+                    is_active = TRUE,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING *
             """
