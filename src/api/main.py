@@ -50,13 +50,8 @@ print("=====================================================")
 print("INITIALIZING FASTAPI APP")
 print("=====================================================")
 
-# Define allowed origins
-origins = [
-    "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
-    "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
-    "http://localhost:3000",  # Local frontend development
-    "http://localhost:5000"   # Local backend development
-]
+# Define allowed origins - allow all origins for testing
+origins = ["*"]  # Allow all origins for testing
 
 # Add CORS middleware directly to the main app
 app.add_middleware(

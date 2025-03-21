@@ -36,12 +36,7 @@ except ImportError:
 app = FastAPI(title="CORS Proxy for SCARE Unified Dashboard API")
 
 # Configure CORS to allow specific origins
-origins = [
-    "https://front-production-f6e6.up.railway.app",  # Frontend Railway domain
-    "https://scare-unified-dash-production.up.railway.app",  # Backend Railway domain
-    "http://localhost:3000",  # Local frontend development
-    "http://localhost:5000"   # Local backend development
-]
+origins = ["*"]  # Allow all origins for testing
 
 # Add CORS middleware to the proxy app
 app.add_middleware(
@@ -67,15 +62,7 @@ async def log_requests(request: Request, call_next):
         response = await call_next(request)
         
         # Add CORS headers to all responses
-        origin = request.headers.get("origin")
-        if origin and origin in origins:
-            # If there's an origin header and it's in our allowed list, echo it back
-            response.headers["Access-Control-Allow-Origin"] = origin
-        else:
-            # For requests without an origin header or from disallowed origins
-            # Don't set the header at all, which will block the request
-            pass
-            
+        response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "*"
         response.headers["Access-Control-Allow-Credentials"] = "true"
@@ -90,11 +77,8 @@ async def log_requests(request: Request, call_next):
         # Return a generic error response
         response = Response(content=str(e), status_code=500)
         
-        # Only set CORS headers for allowed origins
-        origin = request.headers.get("origin")
-        if origin and origin in origins:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            
+        # Set CORS headers for all origins
+        response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
         response.headers["Access-Control-Allow-Headers"] = "*"
         response.headers["Access-Control-Max-Age"] = "86400"
@@ -124,14 +108,8 @@ async def options_handler(request: Request, path: str):
     # Return an empty response with CORS headers
     response = Response()
     
-    # Only set CORS headers for allowed origins
-    origin = request.headers.get("origin")
-    if origin and origin in origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-    else:
-        # Don't set the header for disallowed origins
-        pass
-        
+    # Set CORS headers for all origins
+    response.headers["Access-Control-Allow-Origin"] = "*"  # Allow all origins
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
     response.headers["Access-Control-Allow-Headers"] = "*"
     response.headers["Access-Control-Allow-Credentials"] = "true"
