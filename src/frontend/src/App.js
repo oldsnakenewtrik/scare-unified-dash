@@ -40,6 +40,7 @@ import CorsTest from './utils/CorsTest';
 // Import components
 import CampaignMapping from './components/CampaignMapping';
 import HierarchicalDashboard from './components/HierarchicalDashboard';
+import WebSocketTest from './components/WebSocketTest';
 
 // Create a theme
 const theme = createTheme({
@@ -117,7 +118,7 @@ function App() {
   const [monthTabs] = useState(generateMonthTabs());
   const [orderBy, setOrderBy] = useState('campaign');
   const [order, setOrder] = useState('asc');
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'campaign-mapping', or 'cors-test'
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'campaign-mapping', 'cors-test', or 'websocket-test'
   
   // Settings menu state
   const [anchorEl, setAnchorEl] = useState(null);
@@ -331,9 +332,38 @@ function App() {
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
               SCARE Unified Metrics Dashboard
             </Typography>
-            <Button color="inherit" component={Link} to="/" onClick={() => handleNavigate('dashboard')}>Dashboard</Button>
-            <Button color="inherit" component={Link} to="/hierarchy" onClick={() => handleNavigate('hierarchy')}>Hierarchical View</Button>
-            <Button color="inherit" component={Link} to="/mapping" onClick={() => handleNavigate('campaign-mapping')}>Campaign Mapping</Button>
+            <Button 
+              color="inherit" 
+              component={Link} 
+              to="/" 
+              onClick={() => handleNavigate('dashboard')}
+            >
+              Dashboard
+            </Button>
+            <Button 
+              color="inherit" 
+              component={Link} 
+              to="/hierarchy" 
+              onClick={() => handleNavigate('hierarchy')}
+            >
+              Hierarchical View
+            </Button>
+            <Button 
+              color="inherit" 
+              component={Link} 
+              to="/mapping" 
+              onClick={() => handleNavigate('campaign-mapping')}
+            >
+              Campaign Mapping
+            </Button>
+            <Button 
+              color="inherit" 
+              component={Link} 
+              to="/websocket-test" 
+              onClick={() => handleNavigate('websocket-test')}
+            >
+              WebSocket Test
+            </Button>
             <IconButton
               color="inherit"
               onClick={handleOpenSettings}
@@ -359,6 +389,7 @@ function App() {
               <MenuItem onClick={() => handleNavigate('dashboard')}>Dashboard</MenuItem>
               <MenuItem onClick={() => handleNavigate('campaign-mapping')}>Campaign Name Mapping</MenuItem>
               <MenuItem onClick={() => handleNavigate('settings/campaign-mapping?refresh=true')}>Check for New Campaigns</MenuItem>
+              <MenuItem onClick={() => handleNavigate('websocket-test')}>WebSocket Test</MenuItem>
             </Menu>
           </Toolbar>
         </AppBar>
@@ -494,6 +525,8 @@ function App() {
             <CampaignMapping />
           ) : currentView === 'hierarchy' ? (
             <HierarchicalDashboard />
+          ) : currentView === 'websocket-test' ? (
+            <WebSocketTest />
           ) : currentView === 'settings/campaign-mapping?refresh=true' ? (
             <Button 
               variant="contained" 
