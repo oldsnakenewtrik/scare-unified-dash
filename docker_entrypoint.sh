@@ -7,6 +7,14 @@ echo "Python path: $PYTHONPATH"
 echo "Working directory: $(pwd)"
 echo "Port: $PORT"
 
+# Added detailed port debugging
+echo "============== PORT DEBUGGING =============="
+echo "RAILWAY_PORT: ${RAILWAY_PORT:-not set}"
+echo "PORT: ${PORT:-not set}"
+echo "DEFAULT PORT: 5000"
+echo "ACTUAL PORT USED: ${PORT:-5000}"
+echo "============================================"
+
 # Create data directory if it doesn't exist
 mkdir -p ./data
 
@@ -40,6 +48,12 @@ python ./src/api/db_init.py
 # Set default port if not provided
 export PORT="${PORT:-5000}"
 echo "Using PORT: $PORT"
+
+# Enhanced port debugging before server starts
+echo "============== FINAL PORT CHECK =============="
+echo "FINAL PORT TO BE USED BY UVICORN: $PORT"
+echo "If this doesn't match Railway's service port setting (5000), update one of them"
+echo "=============================================="
 
 # Run port debug script
 echo "Running port debug script..."
