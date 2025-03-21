@@ -161,6 +161,36 @@ After deploying the CORS and WebSocket fixes, the application was still experien
 - Test the backend endpoints to ensure they're accessible
 - Once confirmed working, consider switching back to specific origins for better security
 
+### March 21, 2025 (Update 2): Fixed Port Mismatch Issue in Railway
+
+#### Problem:
+After updating the code, the application was still experiencing "Bad Gateway" errors. The logs showed that the application was running successfully on port 8080, but Railway was configured to use port 5000.
+
+#### Investigation:
+1. The Railway settings showed the backend was configured to use port 5000 in the networking settings
+2. The logs showed the application was actually running on port 8080
+3. Additionally, there was a custom start command in Railway that was using port 8000 as the default
+4. This port mismatch was causing the "Bad Gateway" errors
+
+#### Solution:
+1. **Port Configuration Fix**:
+   - Updated our code to use port 8080 consistently as the default port
+   - Updated the docker_entrypoint.sh file to use port 8080 as the default
+   - Updated the main.py file to use port 8080 as the default
+
+2. **Railway Configuration**:
+   - The Railway networking settings need to be updated to use port 8080 instead of 5000
+   - Alternatively, the custom start command in Railway could be updated to use port 5000
+
+#### Implementation Details:
+- The code now consistently uses port 8080 as the default
+- The Railway configuration needs to be updated to match this port
+
+#### Next Steps:
+- Update the Railway networking settings to use port 8080
+- Deploy these changes to Railway
+- Test the backend endpoints to ensure they're accessible
+
 ## Current Status (March 2025)
 We have successfully completed the database schema design and Google Ads integration. We've verified that we can fetch real campaign data from Google Ads API and store it properly in our database. The two-step ETL process provides resilience against connectivity issues, which is particularly important for Railway deployment.
 

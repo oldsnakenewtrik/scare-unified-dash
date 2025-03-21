@@ -38,7 +38,7 @@ echo "Initializing database..."
 python ./src/api/db_init.py
 
 # Set default port if not provided
-export PORT="${PORT:-5000}"
+export PORT="${PORT:-8080}"
 echo "Using PORT: $PORT"
 
 # Install dependencies if needed
