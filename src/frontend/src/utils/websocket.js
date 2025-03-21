@@ -7,8 +7,8 @@
 const getWebSocketUrl = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   
-  // If we're in the Railway production environment
-  if (window.location.hostname.includes('railway.app')) {
+  // If we're in the production environment
+  if (process.env.NODE_ENV === 'production') {
     // Use the backend service URL with the WebSocket protocol
     return `${protocol}//scare-unified-dash-production.up.railway.app/ws`;
   }
@@ -23,8 +23,8 @@ const getWebSocketUrl = () => {
 const getFallbackUrl = () => {
   const protocol = window.location.protocol;
   
-  // If we're in the Railway production environment
-  if (window.location.hostname.includes('railway.app')) {
+  // If we're in the production environment
+  if (process.env.NODE_ENV === 'production') {
     return `${protocol}//scare-unified-dash-production.up.railway.app/api/ws-fallback`;
   }
   
