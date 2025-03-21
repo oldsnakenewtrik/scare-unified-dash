@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body
+from fastapi import FastAPI, Depends, HTTPException, Query, Path, status, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +20,58 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# Function to run database migrations
+def run_migrations(engine):
+    """Run database migrations during application startup"""
+    try:
+        logger.info("Checking for database migrations to apply")
+        
+        # Create migrations table if it doesn't exist
+        with engine.connect() as conn:
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS public.migrations (
+                id SERIAL PRIMARY KEY,
+                migration_name VARCHAR(255) NOT NULL UNIQUE,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """))
+            
+            # Get list of applied migrations
+            result = conn.execute(text("SELECT migration_name FROM public.migrations"))
+            applied_migrations = [row[0] for row in result]
+            
+            # Get list of migration files
+            migrations_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "migrations")
+            if os.path.exists(migrations_dir):
+                migration_files = sorted([f for f in os.listdir(migrations_dir) if f.endswith('.sql')])
+                
+                # Apply migrations that haven't been applied yet
+                for migration_file in migration_files:
+                    if migration_file not in applied_migrations:
+                        logger.info(f"Applying migration: {migration_file}")
+                        
+                        # Read the migration file
+                        with open(os.path.join(migrations_dir, migration_file), 'r') as f:
+                            migration_sql = f.read()
+                        
+                        # Execute the migration in a transaction
+                        with conn.begin():
+                            conn.execute(text(migration_sql))
+                            
+                            # Record the migration as applied
+                            conn.execute(
+                                text("INSERT INTO public.migrations (migration_name) VALUES (:name)"),
+                                {"name": migration_file}
+                            )
+                        
+                        logger.info(f"Successfully applied migration: {migration_file}")
+            else:
+                logger.warning(f"Migrations directory not found: {migrations_dir}")
+    except Exception as e:
+        logger.error(f"Error applying migrations: {str(e)}")
+        # Don't raise the exception - we want the app to start even if migrations fail
+        # This allows manual intervention if needed
+
 # Database connection
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
 try:
@@ -33,6 +85,10 @@ except Exception as e:
     engine = None
     SessionLocal = None
     Base = declarative_base()
+
+# Run migrations during startup
+if engine is not None:
+    run_migrations(engine)
 
 # Run database initialization (creates tables and runs migrations)
 if engine is not None:
@@ -56,19 +112,18 @@ else:
 
 app = FastAPI(title="SCARE Unified Metrics API")
 
-# Configure CORS to allow any origin - THIS IS CRITICAL FOR PRODUCTION
-print("=====================================================")
-print("INITIALIZING FASTAPI APP")
-print("=====================================================")
-
-# Define allowed origins - allow all origins for testing
-origins = ["*"]  # Allow all origins for testing
+# Define allowed origins - include the specific frontend URL
+origins = [
+    "https://front-production-f6e6.up.railway.app",  # Production frontend
+    "http://localhost:3000",  # Local development frontend
+    "http://127.0.0.1:3000"   # Alternative local frontend
+]
 
 # Add CORS middleware directly to the main app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=False,  # Cannot use credentials with wildcard origins
+    allow_credentials=True,  # Allow credentials since we're using specific origins
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
@@ -1331,6 +1386,29 @@ def get_google_ads_campaigns(db=Depends(get_db)):
         logger.error(f"Error retrieving Google Ads campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/websocket-status", tags=["Diagnostics"])
+async def websocket_status():
+    """
+    Endpoint to check the status of the WebSocket server.
+    Returns information about the WebSocket configuration and active connections.
+    """
+    try:
+        active_connections = len(manager.active_connections) if 'manager' in globals() else 0
+        
+        return {
+            "status": "running",
+            "active_connections": active_connections,
+            "websocket_endpoint": "/ws",
+            "fallback_endpoint": "/api/ws-fallback",
+            "server_time": datetime.datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "server_time": datetime.datetime.now().isoformat()
+        }
+
 # Fallback OPTIONS handler for all routes
 @app.options("/{path:path}")
 async def options_handler(path: str):
@@ -1357,6 +1435,29 @@ async def catch_all_routes(path: str):
     if path.startswith("api/"):
         raise HTTPException(status_code=404, detail="API route not found")
     return FileResponse(os.path.join(frontend_path, "index.html"))
+
+@app.get("/api/test-cors", tags=["Diagnostics"])
+async def test_cors_detailed(request: Request):
+    """
+    Comprehensive test endpoint to verify CORS configuration.
+    Returns detailed information about the request and response headers.
+    """
+    # Get all request headers
+    headers = {k: v for k, v in request.headers.items()}
+    
+    # Get origin header
+    origin = headers.get("origin", "No origin header found")
+    
+    # Return detailed information
+    return {
+        "status": "success",
+        "message": "CORS test endpoint",
+        "request_headers": headers,
+        "origin_received": origin,
+        "allowed_origins": origins,
+        "is_origin_allowed": origin in origins or "*" in origins,
+        "timestamp": datetime.datetime.now().isoformat()
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -94,6 +94,42 @@ The SCARE Unified Dashboard aims to create a single, comprehensive view of marke
   * Database connection issues requiring fallback mechanisms
   * Need to support both development and production environments
 
+### March 21, 2025: Fixed CORS and WebSocket Issues in Railway Production
+
+#### Problem:
+The application was experiencing two critical issues in the Railway production environment:
+1. CORS errors when making API requests from the frontend to the backend
+2. WebSocket connection failures when trying to establish a WebSocket connection
+
+The specific errors were:
+- `Access to XMLHttpRequest at 'https://scare-unified-dash-production.up.railway.app/api/campaign-mappings' from origin 'https://front-production-f6e6.up.railway.app' has been blocked by CORS policy`
+- `WebSocket connection to 'wss://scare-unified-dash-production.up.railway.app:5001/ws' failed`
+
+#### Solution:
+1. **CORS Configuration Fix**:
+   - Updated the CORS configuration to explicitly allow the frontend origin
+   - Changed from wildcard origins (`*`) to specific allowed origins including the production frontend URL
+   - Enabled credentials for CORS requests since we're using specific origins
+
+2. **WebSocket Connection Fix**:
+   - Removed the explicit port (5001) from the WebSocket URL in production
+   - Updated the WebSocket client to use the default port for WSS (443)
+   - Added better error handling and diagnostics for WebSocket connections
+
+3. **Diagnostic Endpoints**:
+   - Added a comprehensive CORS test endpoint that returns detailed information about request headers
+   - Added a WebSocket status endpoint to help diagnose WebSocket connection issues
+
+#### Implementation Details:
+- The CORS middleware now explicitly allows the production frontend domain
+- The WebSocket client now uses the standard port for secure WebSockets in production
+- Added diagnostic endpoints to help troubleshoot any future issues
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Test the CORS and WebSocket connections in the production environment
+- Monitor the application logs to ensure the errors don't occur again
+
 ## Current Status (March 2025)
 We have successfully completed the database schema design and Google Ads integration. We've verified that we can fetch real campaign data from Google Ads API and store it properly in our database. The two-step ETL process provides resilience against connectivity issues, which is particularly important for Railway deployment.
 
@@ -147,3 +183,259 @@ The main issue appears to be with CORS restrictions preventing browser access to
 - Database Connectivity: Addressed by implementing the two-step ETL process
 - Campaign Normalization: Planned solution with manual mapping UI
 - Data Consistency: Ensured by standardized database schema and ETL processes
+
+## CORS and WebSocket Troubleshooting Guide
+
+Note: This guide captures the complexity around resolving CORS and WebSocket issues in production. The final resolutions hinge on confirming that the new deployment is running the same code that was tested locally, ensuring ephemeral ports are handled properly, and verifying the Access-Control-Allow-Origin headers are actually returned in production.
+
+When you see CORS and WebSockets working **locally** but failing in **production (Railway)**, it usually indicates differences in:
+
+1. **Deployed code/config** (perhaps the CORS or WebSocket code is not actually deployed or not configured in your production app),  
+2. **Environment variables / build settings** in production,  
+3. **Proxy/SSL** issues on the live domain (Railway might be behind a load balancer that needs special handling for CORS or WebSockets),  
+4. **Port mismatches** (Railway uses dynamic ports, so your local port might differ from the production port or ephemeral port),  
+5. **Time-outs** or network-level blocks, especially if the server does not respond or if a route is missing.
+
+Below is a **comprehensive plan** to figure out exactly why local works but Railway does not, and how to fix it.
+
+---
+
+### 1. Verify the Exact Code Running in Production
+
+1. **Check your commit history**: Ensure the commit that adds or configures CORS/WebSocket is actually pushed to GitHub (or wherever your Railway project is pulling code).  
+2. **Examine Railway build logs**: Confirm the log shows your new code—especially any lines about `CORSMiddleware` or similar.  
+3. **Compare local vs. production**: Sometimes your local code might have a `cors_test.py` or `websocket_test.py` not actually referenced in the main production `Procfile` or `main.py`.
+
+**Key**: If your local server includes `CORS(app)` or `app.add_middleware(CORSMiddleware, ...)`, ensure the *same logic* is present in production code.  
+
+---
+
+### 2. Confirm You're Using the Correct Production **Host & Port** in Your App
+
+- **Local**: You might do `localhost:5001` or `http://127.0.0.1:5001` and get successful responses.  
+- **Railway**: 
+  - For HTTP, typically you only get a single exposed port, e.g. `PORT=8000`.  
+  - For WebSockets, you must confirm the same server is actually listening for WS upgrades on that same port.  
+  - If your code tries to listen on port `5001` in production, it might fail. On Railway, you usually have to use the ephemeral port (`$PORT`) that Railway provides.
+
+**Check**:
+- If your Python/Node server is set to `port=5001` locally, that's fine for local dev. But in production, you need something like:
+  ```bash
+  uvicorn main:app --host 0.0.0.0 --port $PORT
+  ```
+  or
+  ```js
+  app.listen(process.env.PORT || 8000, ...
+  ```
+- Make sure your front-end requests the correct domain: `https://your-production-service.up.railway.app/`.
+
+---
+
+### 3. Validate CORS Configuration in Production
+
+Even if you have correct CORS for `localhost`, you need a separate entry for your real domain. For example, in FastAPI:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://front-production-f6e6.up.railway.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+```
+
+**Common Mistake**: Locally, you might have `allow_origins=["*"]`, so it works. But in production, you accidentally only allow `localhost`, or you never set it to `["https://front-production-f6e6.up.railway.app"]`.
+
+**Double-check** that your production server is returning the header `Access-Control-Allow-Origin: https://front-production-f6e6.up.railway.app` (or `*`).  
+
+#### 3A. Use Curl or HTTP Client
+
+From your local machine:
+```bash
+curl -i https://scare-unified-dash-production.up.railway.app/api/cors-test \
+  -H "Origin: https://front-production-f6e6.up.railway.app"
+```
+
+Look for:
+```
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: https://front-production-f6e6.up.railway.app
+...
+{
+  "message": "CORS is working"
+}
+```
+If you don't see `Access-Control-Allow-Origin`, your production code is missing the correct CORS config.
+
+---
+
+### 4. Confirm Your `/api/cors-test` Route Actually Exists in Production
+
+Your logs show attempts to call `https://scare-unified-dash-production.up.railway.app/api/cors-test`, which times out. Possibly that route or function:
+
+- **Is only defined** in your local dev environment, or  
+- **Is behind a different path** in production, or  
+- Has a **typo** in the path.
+
+**Idea**:
+- Create a simple route `@app.get("/ping")` that returns `{"message": "pong"}`.  
+- Then ensure you can do `curl -i https://scare-unified-dash-production.up.railway.app/ping`.
+
+If `ping` is missing in production, you know your code is not deployed or you have route mismatch.
+
+---
+
+### 5. Resolve WebSocket Issues (Likely SSL or Proxy)
+
+You see:
+
+```
+WebSocket connection to 'wss://scare-unified-dash-production.up.railway.app/ws' failed: 
+```
+Here's what typically goes wrong:
+
+1. **Your production server must accept WS upgrades** on the same port as HTTP.  
+2. **SSL**: If your site is `https://`, you must use `wss://`. Usually that's correct, but you need to confirm your server container is actually aware of SSL termination. Some setups do SSL termination at the Railway load balancer, so your app might only see plain HTTP traffic.  
+3. **Reverse Proxy**: If your server code is not set up to handle `ws://` or `wss://` correctly, or if you have an older Uvicorn/Gunicorn mismatch that doesn't enable WebSocket routes, the handshake fails.
+
+**Check**:
+- In a typical FastAPI + WebSocket scenario, you might do:
+  ```python
+  @app.websocket("/ws")
+  async def websocket_endpoint(websocket: WebSocket):
+      await websocket.accept()
+      await websocket.send_text("Hello from WebSocket")
+  ```
+- In **Railway** logs, watch for errors about "Trying to upgrade to WebSocket but not found."  
+
+**Solution**: Make sure your production `uvicorn main:app --ws websockets ...` is set up, or you're using Starlette's built-in WebSocket support. Double-check `wss://` is correct and your domain's SSL is handled by Railway.
+
+---
+
+### 6. Eliminate "CORS Proxy" Attempts in Production
+
+Your logs mention `corsProxy.js` or "fetchThroughProxy." This suggests your code tries to do:
+
+1. **Direct call** to `scare-unified-dash-production.up.railway.app`.  
+2. If it fails, it tries `corsproxy.io`, `https://cors-anywhere.herokuapp.com/`, etc.
+
+Those proxies might block your domain or require manual activation. **Remove** that fallback in production. The correct approach is for your server to return the proper CORS headers so no proxy is necessary.
+
+---
+
+### 7. Watch Out for Timeouts
+
+You see:
+
+```
+Error fetching campaign data: AxiosError 
+message: 'timeout of 10000ms exceeded', code: 'ECONNABORTED'
+```
+That means your front-end waited 10 seconds, but the server never responded. Potential reasons:
+
+1. **Your server never got the request** (maybe the route doesn't exist, or your server is not truly listening).  
+2. **Your server's code is throwing an error** or is stuck. Check logs on Railway for Python or Node tracebacks.  
+3. **Network** or DNS issues. But less likely if the domain is correct.
+
+**Action**:
+- Lower your suspicion about CORS itself if it's simply timing out. A pure CORS error usually returns quickly with a "blocked by CORS" message. A 10-second or more delay suggests the server is not responding at all.  
+
+---
+
+### 8. Steps to Systematically Debug On Railway
+
+1. **Check Railway Logs**: 
+   - Do you see errors like "`AttributeError: 'FastAPI' object has no attribute 'websocket'`" or "`No route found for GET /api/cors-test`"?  
+2. **Hit your API from a direct tool** (like curl or Postman) with the production domain.  
+3. **Hit the "/docs" (if using FastAPI)** or "/openapi.json" in production. If that 404s, your app might not be running the same code.  
+4. **Temporarily** remove all your "corsProxy" code in the front-end so you only do:
+   ```js
+   axios.get("https://scare-unified-dash-production.up.railway.app/api/campaigns/metrics")
+       .then(res => console.log(res.data))
+       .catch(err => console.error(err));
+   ```
+   Then watch the network tab and see if it fails with a "blocked by CORS" or if it times out or returns 404/500.
+
+---
+
+### 9. Potential Quick Fixes
+
+- **Ensure your production `Procfile` (or Docker CMD)** is launching your app with the CORS + WebSocket code loaded. For example:
+  ```
+  web: uvicorn main:app --host 0.0.0.0 --port $PORT
+  ```
+- **In your code**:
+  ```python
+  app.add_middleware(
+      CORSMiddleware,
+      allow_origins=["*"],
+      allow_credentials=True,
+      allow_methods=["*"],
+      allow_headers=["*"]
+  )
+
+  @app.get("/api/cors-test")
+  def cors_test():
+      return {"message": "CORS is working in production."}
+  ```
+
+- **Double-check** the route `@app.websocket("/ws")` is actually declared. And your Docker or server logs that it's listening for websockets.
+
+---
+
+### 10. Summary of Why Local Works But Production Fails
+
+1. **Local**: 
+   - You have the server on `localhost:5001`. 
+   - Possibly you used `allow_origins=["*"]`, so no CORS issues. 
+   - You tested WebSockets with `ws://localhost:5001/ws` and it's working because you are controlling everything on the same machine.  
+2. **Production**: 
+   - You're on `https://scare-unified-dash-production.up.railway.app` behind a load balancer. 
+   - If your production code doesn't have the correct CORS config or the route is missing, you get timeouts or "blocked by CORS." 
+   - If your WebSocket code isn't set to handle WSS or the route is behind some other server block, it fails.
+
+**Hence**: 
+- The environment is different (ports, domain, SSL) → you must replicate your local success by carefully setting the same config in production, ensuring your routes exist, and returning the correct headers.
+
+---
+
+### Final Checklist
+
+1. **CORS**: Add `CORSMiddleware` or `app.use(cors(...))` in **production** code.  
+2. **Routes**: Confirm `/api/cors-test`, `/api/campaigns/metrics`, and `/ws` actually exist in your production server code.  
+3. **Procfile** / Docker**: Make sure you run the same app entry point that includes the routes.  
+4. **Check logs** on Railway for 404s or Python/Node errors.  
+5. **Remove** fallback proxies. Rely on your server returning `Access-Control-Allow-Origin` properly.  
+6. **Test** with direct fetch or curl from your local machine → your domain → see if response headers are correct.  
+7. **WebSocket**: Ensure your server and Railway environment allow WSS on the same `$PORT` or ephemeral port. Possibly use `wss://scare-unified-dash-production.up.railway.app/ws`.
+
+By addressing each of these points, you'll align your production environment with your local setup—and the CORS + WebSocket connections should succeed on Railway just like they do locally.
+
+## 2025-03-21: Fixed Database Schema Issues
+
+### Problem:
+The PostgreSQL database on Railway was showing errors in the logs:
+```
+ERROR: column "network" of relation "sm_fact_bing_ads" does not exist
+```
+
+This error occurred because the application was trying to insert data into the `sm_fact_bing_ads` table with a `network` column, but that column didn't exist in the production database.
+
+### Solution:
+1. Created a new migration script `005_add_network_to_bing_ads.sql` to add the missing `network` column to the `sm_fact_bing_ads` table.
+2. Created an `apply_migrations.py` script to apply database migrations to the Railway PostgreSQL database.
+3. Updated the `db_init.py` file to handle cases where the table or column might not exist yet.
+
+### Implementation Details:
+- The migration script uses a DO block to safely add the column if it doesn't exist.
+- It also sets a default value of 'Search' for existing records.
+- The `apply_migrations.py` script tracks applied migrations in a new `migrations` table to avoid applying the same migration twice.
+- The `column_exists` function in `db_init.py` was updated to handle exceptions when checking if a column exists.
+
+### Next Steps:
+- Run the migration script on the Railway database to fix the error.
+- Monitor the logs to ensure the error doesn't occur again.
+- Consider adding a database schema validation step to the application startup to catch schema mismatches early.
+
+---
