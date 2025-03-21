@@ -38,5 +38,4 @@ python ./src/api/db_init.py
 
 # Start the API server
 echo "Starting web server with CORS proxy..."
-cd .
 exec python -m uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port $PORT

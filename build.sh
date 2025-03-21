@@ -14,8 +14,8 @@ pip install --no-cache-dir fastapi==0.110.0 uvicorn==0.28.0 pydantic==2.6.1 star
 
 # Build frontend
 echo "Building frontend..."
-cd src/frontend
-npm ci --production --no-optional
-npm run build
+# Instead of cd, use the full path with npm
+npm --prefix ./src/frontend ci --production --no-optional
+npm --prefix ./src/frontend run build
 
 echo "Build completed successfully!"
