@@ -3,126 +3,73 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { 
   CssBaseline, 
   AppBar, 
+  Box, 
   Toolbar, 
   Typography, 
+  Paper, 
   Container, 
   Grid, 
-  Paper, 
-  Box,
-  CircularProgress,
-  TextField,
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableContainer, 
+  TableHead, 
+  TableRow, 
+  TableSortLabel,
+  TablePagination,
   Button,
-  Tabs,
-  Tab,
+  CircularProgress,
   FormControlLabel,
   Switch,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TableSortLabel,
+  Tabs,
+  Tab,
   IconButton,
   Menu,
-  MenuItem
+  MenuItem,
+  Link as MuiLink
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { format, subDays, subMonths, parse } from 'date-fns';
+import { Link, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import SettingsIcon from '@mui/icons-material/Settings';
-import axios from 'axios';
-import { useNavigate, Link } from 'react-router-dom';
-import corsProxy from './utils/corsProxy';
-
-// Import components
+import MenuIcon from '@mui/icons-material/Menu';
+import UnifiedDashboard from './components/UnifiedDashboard';
 import CampaignMapping from './components/CampaignMapping';
-import HierarchicalDashboard from './components/HierarchicalDashboard';
 import WebSocketTest from './components/WebSocketTest';
 import CorsTest from './components/CorsTest';
+import corsProxy from './utils/corsProxy';
 
 // Create a theme
 const theme = createTheme({
   palette: {
-    mode: 'light',
     primary: {
-      main: '#1976d2',
+      main: '#25385b', // Dark blue
     },
     secondary: {
-      main: '#dc004e',
+      main: '#23c785', // Green
     },
-    background: {
-      default: '#f5f5f5',
-    },
+    accent: {
+      main: '#baa673', // Beige/gold
+    }
   },
 });
 
 // API base URL (set in .env)
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
 
-// Function to generate tabs for the last 12 months
-const generateMonthTabs = () => {
-  const tabs = [];
-  const today = new Date();
-  
-  // Add an "All Time" tab
-  tabs.push({
-    label: 'All Time',
-    value: 'all',
-    startDate: null,
-    endDate: null
-  });
-  
-  // Add tabs for the last 12 months
-  for (let i = 0; i < 12; i++) {
-    const date = subMonths(today, i);
-    const monthYear = format(date, 'MMM yyyy');
-    const startDate = new Date(date.getFullYear(), date.getMonth(), 1);
-    const endDate = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-    
-    tabs.push({
-      label: monthYear,
-      value: monthYear.toLowerCase().replace(' ', '-'),
-      startDate,
-      endDate
-    });
-  }
-  
-  return tabs;
-};
-
-// Table columns configuration
-const columns = [
-  { id: 'campaign', label: 'Campaign', align: 'left', minWidth: 170 },
-  { id: 'spend', label: 'Spend', align: 'right', format: (value) => value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) },
-  { id: 'revenue', label: 'Revenue', align: 'right', format: (value) => value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) },
-  { id: 'mer', label: 'MER', align: 'right', format: (value) => value.toFixed(2) },
-  { id: 'clicks', label: 'Clicks', align: 'right', format: (value) => value.toLocaleString() },
-  { id: 'users', label: 'Users', align: 'right', format: (value) => value.toLocaleString() },
-  { id: 'smoothLeads', label: 'Smooth Lead', align: 'right', format: (value) => value.toLocaleString() },
-  { id: 'totalSales', label: 'Total Sales', align: 'right', format: (value) => value.toLocaleString() },
-  { id: 'impressions', label: 'Impressions', align: 'right', format: (value) => value.toLocaleString() },
-  { id: 'cpc', label: 'Avg CPC', align: 'right', format: (value) => value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) },
-  { id: 'status', label: 'Status', align: 'center' }
-];
-
 function App() {
   // State variables
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [anchorEl, setAnchorEl] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [campaignData, setCampaignData] = useState([]);
   const [filteredData, setFilteredData] = useState([]);
-  const [monthTabs] = useState(generateMonthTabs());
+  const [monthTabs] = useState([]);
   const [orderBy, setOrderBy] = useState('campaign');
   const [order, setOrder] = useState('asc');
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'campaign-mapping', 'cors-test', or 'websocket-test'
-  
-  // Settings menu state
-  const [anchorEl, setAnchorEl] = useState(null);
-  const openMenu = Boolean(anchorEl);
   const navigate = useNavigate();
 
   // Function to fetch data from API
@@ -140,8 +87,8 @@ function App() {
       oneYearAgo.setDate(1); // First day of the month
       
       const params = {
-        start_date: format(oneYearAgo, 'yyyy-MM-dd'),
-        end_date: format(today, 'yyyy-MM-dd')
+        start_date: oneYearAgo.toISOString().split('T')[0],
+        end_date: today.toISOString().split('T')[0]
       };
       console.log('Using date range:', params);
       const response = await corsProxy.get('/api/campaign-metrics', params);
@@ -149,8 +96,6 @@ function App() {
       // Transform and store the data
       console.log('Campaign data received:', response.data.length, 'records');
       setCampaignData(response.data);
-      
-      // Apply initial filtering
       filterDataByTab(activeTab, response.data, showArchived);
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -235,23 +180,34 @@ function App() {
     
     if (tab.startDate && tab.endDate) {
       filtered = filtered.filter(item => {
-        const itemDate = new Date(item.date);
-        return itemDate >= tab.startDate && itemDate <= tab.endDate;
+        // Check if the item has a date property or is Google Ads data which doesn't have date
+        if (item.date) {
+          const itemDate = new Date(item.date);
+          return itemDate >= tab.startDate && itemDate <= tab.endDate;
+        }
+        return true; // Include items without date property (like Google Ads data)
       });
     }
     
-    // Filter by active/archived status
+    // Filter by active/archived status - only if the property exists
     if (!includeArchived) {
-      filtered = filtered.filter(item => item.is_active);
+      filtered = filtered.filter(item => 
+        item.is_active === undefined || item.is_active === true
+      );
     }
     
     // Group by campaign and aggregate metrics
     const campaignMap = new Map();
     
     filtered.forEach(item => {
-      if (!campaignMap.has(item.campaign_name)) {
-        campaignMap.set(item.campaign_name, {
-          campaign: item.campaign_name,
+      // Use campaign_name if it exists, fall back to original_campaign_name for Google Ads data
+      const campaignName = item.campaign_name || item.original_campaign_name || 'Unknown';
+      
+      if (!campaignMap.has(campaignName)) {
+        campaignMap.set(campaignName, {
+          campaign: campaignName,
+          platform: item.platform || 'Unknown',
+          network: item.network || 'Unknown',
           spend: 0,
           revenue: 0,
           clicks: 0,
@@ -259,23 +215,36 @@ function App() {
           users: 0,
           smoothLeads: 0,
           totalSales: 0,
-          status: item.is_active ? 'Active' : 'Archived',
+          status: item.is_active === false ? 'Archived' : 'Active',
           cpc: 0,
+          conversions: 0,
           clickCount: 0 // Helper for calculating average CPC
         });
       }
       
-      const campaign = campaignMap.get(item.campaign_name);
-      campaign.spend += item.spend || 0;
+      const campaign = campaignMap.get(campaignName);
+      // Handle Google Ads data format
+      if (item.cost !== undefined) {
+        campaign.spend += item.cost || 0;
+      } else {
+        campaign.spend += item.spend || 0;
+      }
+      
       campaign.revenue += item.revenue || 0;
       campaign.clicks += item.clicks || 0;
       campaign.impressions += item.impressions || 0;
       campaign.users += item.users || 0;
       campaign.smoothLeads += item.smooth_leads || 0;
       campaign.totalSales += item.total_sales || 0;
+      campaign.conversions += item.conversions || 0;
       
       // For calculating average CPC
-      if (item.cpc && item.clicks) {
+      if (item.cost && item.clicks && item.clicks > 0) {
+        // For Google Ads data
+        campaign.cpc += item.cost / item.clicks;
+        campaign.clickCount++;
+      } else if (item.cpc && item.clicks) {
+        // For other data sources
         campaign.cpc += item.cpc * item.clicks;
         campaign.clickCount += item.clicks;
       }
@@ -330,8 +299,8 @@ function App() {
     filterDataByTab(activeTab, campaignData, event.target.checked);
   };
   
-  // Settings menu handlers
-  const handleOpenSettings = (event) => {
+  // Handle menu open/close
+  const handleMenuOpen = (event) => {
     setAnchorEl(event.currentTarget);
   };
   
@@ -339,17 +308,10 @@ function App() {
     setAnchorEl(null);
   };
   
-  const handleNavigate = (path) => {
-    setCurrentView(path);
-    setAnchorEl(null);
-    if (path === 'dashboard') {
-      navigate('/');
-    } else if (path.includes('?')) {
-      // Handle paths with query parameters
-      navigate(`/${path}`);
-    } else {
-      navigate(`/${path}`);
-    }
+  // Navigation handler
+  const handleNavigate = (view) => {
+    setCurrentView(view);
+    handleCloseSettings();
   };
 
   // Fetch data on component mount
@@ -361,226 +323,53 @@ function App() {
     <ThemeProvider theme={theme}>
       <LocalizationProvider dateAdapter={AdapterDateFns}>
         <CssBaseline />
-        <AppBar position="static">
-          <Toolbar>
-            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-              SCARE Unified Metrics Dashboard
-            </Typography>
-            <Button 
-              color="inherit" 
-              component={Link} 
-              to="/" 
-              onClick={() => handleNavigate('dashboard')}
-            >
-              Dashboard
-            </Button>
-            <Button 
-              color="inherit" 
-              component={Link} 
-              to="/hierarchy" 
-              onClick={() => handleNavigate('hierarchy')}
-            >
-              Hierarchical View
-            </Button>
-            <Button 
-              color="inherit" 
-              component={Link} 
-              to="/mapping" 
-              onClick={() => handleNavigate('campaign-mapping')}
-            >
-              Campaign Mapping
-            </Button>
-            <Button 
-              color="inherit" 
-              component={Link} 
-              to="/websocket-test" 
-              onClick={() => handleNavigate('websocket-test')}
-            >
-              WebSocket Test
-            </Button>
-            <Button 
-              color="inherit" 
-              component={Link} 
-              to="/cors-test" 
-              onClick={() => handleNavigate('cors-test')}
-            >
-              CORS Test
-            </Button>
-            <IconButton
-              color="inherit"
-              onClick={handleOpenSettings}
-              aria-label="settings"
-            >
-              <SettingsIcon />
-            </IconButton>
-            <Menu
-              id="menu-appbar"
-              anchorEl={anchorEl}
-              anchorOrigin={{
-                vertical: 'bottom',
-                horizontal: 'right',
-              }}
-              keepMounted
-              transformOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              open={Boolean(anchorEl)}
-              onClose={handleCloseSettings}
-            >
-              <MenuItem onClick={() => handleNavigate('dashboard')}>Dashboard</MenuItem>
-              <MenuItem onClick={() => handleNavigate('campaign-mapping')}>Campaign Name Mapping</MenuItem>
-              <MenuItem onClick={() => handleNavigate('settings/campaign-mapping?refresh=true')}>Check for New Campaigns</MenuItem>
-              <MenuItem onClick={() => handleNavigate('websocket-test')}>WebSocket Test</MenuItem>
-            </Menu>
-          </Toolbar>
-        </AppBar>
+          <AppBar position="static" sx={{ bgcolor: '#25385b' }}>
+            <Toolbar>
+              <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+                <img 
+                  src="/SonderCare-Company-Logo-Official-SVG (1).svg" 
+                  alt="SonderCare Logo" 
+                  style={{ height: '45px', marginRight: '12px' }} 
+                />
+              </Box>
+              <Button 
+                color="inherit" 
+                component={Link} 
+                to="/"
+                sx={{ color: '#fff' }}
+              >
+                Dashboard
+              </Button>
+              <IconButton 
+                size="large" 
+                edge="end" 
+                color="inherit" 
+                aria-label="settings"
+                onClick={handleMenuOpen}
+                sx={{ color: '#fff' }}
+              >
+                <SettingsIcon />
+              </IconButton>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={handleCloseSettings}
+              >
+                <MenuItem component={Link} to="/mapping" onClick={handleCloseSettings}>Campaign Name Mapping</MenuItem>
+                <MenuItem component={Link} to="/websocket-test" onClick={handleCloseSettings}>WebSocket Test</MenuItem>
+                <MenuItem component={Link} to="/cors-test" onClick={handleCloseSettings}>CORS Test</MenuItem>
+              </Menu>
+            </Toolbar>
+          </AppBar>
 
-        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-          {currentView === 'dashboard' ? (
-            <>
-              {/* Campaign filters */}
-              <Paper sx={{ p: 2, mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={showArchived}
-                          onChange={handleArchivedToggle}
-                          color="primary"
-                        />
-                      }
-                      label="Show Archived Campaigns"
-                    />
-                  </Box>
-                  <Box>
-                    <Button 
-                      variant="contained" 
-                      onClick={fetchData}
-                      disabled={loading}
-                    >
-                      {loading ? 'Loading...' : 'Refresh Data'}
-                    </Button>
-                  </Box>
-                </Box>
-              </Paper>
-              
-              {/* Error display */}
-              {error && (
-                <Paper sx={{ p: 2, mb: 3, bgcolor: 'error.light' }}>
-                  <Typography color="error">{error}</Typography>
-                </Paper>
-              )}
-              
-              {/* Loading indicator */}
-              {loading && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-                  <CircularProgress />
-                </Box>
-              )}
-              
-              {/* Month tabs */}
-              <Paper sx={{ mb: 3 }}>
-                <Tabs
-                  value={activeTab}
-                  onChange={handleTabChange}
-                  indicatorColor="primary"
-                  textColor="primary"
-                  variant="scrollable"
-                  scrollButtons="auto"
-                >
-                  {monthTabs.map((tab) => (
-                    <Tab key={tab.value} label={tab.label} value={tab.value} />
-                  ))}
-                </Tabs>
-              </Paper>
-              
-              {/* Campaign data table */}
-              <Paper sx={{ width: '100%', overflow: 'hidden' }}>
-                <TableContainer sx={{ maxHeight: 600 }}>
-                  <Table stickyHeader aria-label="campaign metrics table">
-                    <TableHead>
-                      <TableRow>
-                        {columns.map((column) => (
-                          <TableCell
-                            key={column.id}
-                            align={column.align}
-                            style={{ minWidth: column.minWidth }}
-                            sortDirection={orderBy === column.id ? order : false}
-                          >
-                            <TableSortLabel
-                              active={orderBy === column.id}
-                              direction={orderBy === column.id ? order : 'asc'}
-                              onClick={() => handleRequestSort(column.id)}
-                            >
-                              {column.label}
-                            </TableSortLabel>
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {getSortedData().map((row, index) => {
-                        return (
-                          <TableRow hover role="checkbox" tabIndex={-1} key={index}>
-                            {columns.map((column) => {
-                              const value = row[column.id];
-                              return (
-                                <TableCell key={column.id} align={column.align}>
-                                  {column.id === 'status' ? (
-                                    <Box
-                                      component="span"
-                                      sx={{
-                                        p: 0.5,
-                                        borderRadius: 1,
-                                        bgcolor: value === 'Active' ? 'success.light' : 'text.disabled',
-                                        color: value === 'Active' ? 'success.dark' : 'text.primary'
-                                      }}
-                                    >
-                                      {value}
-                                    </Box>
-                                  ) : column.format && value !== null ? (
-                                    column.format(value)
-                                  ) : (
-                                    value || 'N/A'
-                                  )}
-                                </TableCell>
-                              );
-                            })}
-                          </TableRow>
-                        );
-                      })}
-                      {filteredData.length === 0 && !loading && (
-                        <TableRow>
-                          <TableCell colSpan={columns.length} align="center">
-                            No data available for this period
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Paper>
-            </>
-          ) : currentView === 'hierarchy' ? (
-            <HierarchicalDashboard />
-          ) : currentView === 'campaign-mapping' ? (
-            <CampaignMapping />
-          ) : currentView === 'websocket-test' ? (
-            <WebSocketTest />
-          ) : currentView === 'cors-test' ? (
-            <CorsTest />
-          ) : currentView === 'settings/campaign-mapping?refresh=true' ? (
-            <Button 
-              variant="contained" 
-              onClick={fetchData}
-              disabled={loading}
-            >
-              {loading ? 'Loading...' : 'Refresh Data'}
-            </Button>
-          ) : null}
-        </Container>
+          <Container sx={{ mt: 4, mb: 4 }} maxWidth={false}>
+            <Routes>
+              <Route path="/" element={<UnifiedDashboard />} />
+              <Route path="/mapping" element={<CampaignMapping />} />
+              <Route path="/websocket-test" element={<WebSocketTest />} />
+              <Route path="/cors-test" element={<CorsTest />} />
+            </Routes>
+          </Container>
       </LocalizationProvider>
     </ThemeProvider>
   );
