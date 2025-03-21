@@ -23,9 +23,9 @@ import aiohttp
 from sqlalchemy import inspect
 
 # Import the database initialization module
-from db_init import init_database, connect_with_retry
+from .db_init import init_database, connect_with_retry
 # Import the database monitoring module
-from db_monitor import initialize_monitor, get_db_status, force_db_reconnect
+from .db_monitor import initialize_monitor, get_db_status, force_db_reconnect
 
 # Set up logging
 logging.basicConfig(
