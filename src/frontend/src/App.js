@@ -133,7 +133,18 @@ function App() {
     try {
       // Fetch all campaign data using CORS proxy
       console.log('Fetching campaign metrics data...');
-      const response = await corsProxy.get('/api/campaign-metrics');
+      // Get today's date and first day of the month a year ago as default date range
+      const today = new Date();
+      const oneYearAgo = new Date(today);
+      oneYearAgo.setFullYear(today.getFullYear() - 1);
+      oneYearAgo.setDate(1); // First day of the month
+      
+      const params = {
+        start_date: format(oneYearAgo, 'yyyy-MM-dd'),
+        end_date: format(today, 'yyyy-MM-dd')
+      };
+      console.log('Using date range:', params);
+      const response = await corsProxy.get('/api/campaign-metrics', params);
       
       // Transform and store the data
       console.log('Campaign data received:', response.data.length, 'records');
