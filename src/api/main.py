@@ -367,6 +367,7 @@ class CampaignMappingCreate(BaseModel):
     network: Optional[str] = None
     pretty_network: Optional[str] = None
     pretty_source: Optional[str] = None
+    display_order: Optional[int] = None
 
 class CampaignMapping(CampaignMappingCreate):
     id: int
