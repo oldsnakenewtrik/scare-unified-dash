@@ -191,6 +191,37 @@ After updating the code, the application was still experiencing "Bad Gateway" er
 - Deploy these changes to Railway
 - Test the backend endpoints to ensure they're accessible
 
+### March 21, 2025 (Update 3): Explicit Port Configuration for Railway
+
+#### Problem:
+After updating the code to use port 8080 consistently, the application was still running on port 8080 but Railway was configured to use port 5000, resulting in "Bad Gateway" errors.
+
+#### Investigation:
+1. The logs showed that despite our changes, the application was still running on port 8080
+2. Railway was configured to use port 5000 in the networking settings
+3. This persistent port mismatch was causing the "Bad Gateway" errors
+
+#### Solution:
+1. **Explicit Port Configuration**:
+   - Added code to explicitly set the port to 5000 at the beginning of main.py
+   - Updated docker_entrypoint.sh to explicitly set PORT to 5000 (not using a default value)
+   - Modified the uvicorn command to explicitly use port 5000 instead of using the PORT variable
+   - Added a port_debug.py script to help diagnose port configuration issues
+
+2. **Debugging Improvements**:
+   - Added more logging to track the port configuration
+   - Created a dedicated debugging script to print all port-related environment variables
+
+#### Implementation Details:
+- The PORT environment variable is now explicitly set to 5000 in multiple places
+- The uvicorn command now uses the hardcoded port 5000
+- Added a debugging script to help diagnose port configuration issues
+
+#### Next Steps:
+- Deploy these changes to Railway
+- Check the logs to ensure the application is running on port 5000
+- Test the backend endpoints to ensure they're accessible
+
 ## Current Status (March 2025)
 We have successfully completed the database schema design and Google Ads integration. We've verified that we can fetch real campaign data from Google Ads API and store it properly in our database. The two-step ETL process provides resilience against connectivity issues, which is particularly important for Railway deployment.
 

@@ -7,12 +7,20 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 import sys
-from dotenv import load_dotenv
-from pydantic import BaseModel
-from typing import List, Optional
+import json
+import time
+import uuid
 import datetime
 import logging
-import pathlib
+import traceback
+from typing import List, Dict, Any, Optional, Union
+from pathlib import Path
+
+# Force the port to be 5000 to match Railway configuration
+os.environ["PORT"] = "5000"
+
+import asyncio
+import aiohttp
 
 # Set up logging
 logger = logging.getLogger(__name__)
