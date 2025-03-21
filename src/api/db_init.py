@@ -58,8 +58,8 @@ def init_database():
             # Add network column to all fact tables
             add_network_column(conn)
             
-            # Insert sample data
-            insert_sample_data(conn)
+            # Insert sample data - DISABLED TO AVOID CONFUSION WITH REAL DATA
+            # insert_sample_data(conn)
             
         logger.info("Database initialization completed successfully")
         
