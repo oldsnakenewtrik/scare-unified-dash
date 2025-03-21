@@ -5,6 +5,7 @@ set -e
 echo "Starting SCARE Unified Dashboard..."
 echo "Python path: $PYTHONPATH"
 echo "Working directory: $(pwd)"
+echo "Port: $PORT"
 
 # Create data directory if it doesn't exist
 mkdir -p ./data
@@ -38,4 +39,7 @@ python ./src/api/db_init.py
 
 # Start the API server
 echo "Starting web server with CORS proxy..."
-exec python -m uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port $PORT
+# Use a default port if PORT is not set or not a number
+PORT_NUMBER=${PORT:-8000}
+echo "Using port: $PORT_NUMBER"
+exec python -m uvicorn src.api.cors_proxy:app --host 0.0.0.0 --port "$PORT_NUMBER"
