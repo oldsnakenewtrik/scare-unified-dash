@@ -5,80 +5,49 @@ set -e
 echo "Starting SCARE Unified Dashboard..."
 echo "Python path: $PYTHONPATH"
 echo "Working directory: $(pwd)"
-echo "Port: $PORT"
 
 # Added detailed port debugging
 echo "============== PORT DEBUGGING =============="
 echo "RAILWAY_PORT: ${RAILWAY_PORT:-not set}"
 echo "PORT: ${PORT:-not set}"
-echo "DEFAULT PORT: 5000"
-echo "ACTUAL PORT USED: ${PORT:-5000}"
+echo "DEFAULT PORT: 5432"
+echo "ACTUAL PORT USED: ${PORT:-5432}"
 echo "============================================"
 
 # Create data directory if it doesn't exist
 mkdir -p ./data
 
-# Start Google Ads ETL service in the background
-echo "Starting Google Ads ETL service..."
-python ./src/data_ingestion/google_ads/main.py --service &
-GOOGLE_ADS_PID=$!
-
-# Wait a moment to ensure the service starts
-sleep 2
-
-# Check if service started successfully - use kill -0 instead of ps
-if kill -0 $GOOGLE_ADS_PID 2>/dev/null; then
-    echo "Google Ads ETL service started successfully (PID: $GOOGLE_ADS_PID)"
-else
-    echo "Warning: Google Ads ETL service failed to start"
-fi
+# Run port debug script
+echo "Running port debug script..."
+python ./src/api/port_debug.py
 
 # Check PostgreSQL connection using the DATABASE_URL environment variable directly
 echo "Checking database connection..."
-if python -c "import sqlalchemy, os; print('ENV DATABASE_URL:', os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_DATABASE_URL')); engine = sqlalchemy.create_engine(os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_DATABASE_URL')); conn = engine.connect(); conn.close(); print('Database connection successful!')"; then
-    echo "Database connection confirmed!"
+if python -c "
+import os
+import sys
+print('Python version:', sys.version)
+print('DATABASE_URL:', os.environ.get('DATABASE_URL', 'Not set').replace('postgres://', 'postgresql://'))
+print('PGHOST:', os.environ.get('PGHOST', 'Not set'))
+print('PGUSER:', os.environ.get('PGUSER', 'Not set'))
+print('PGDATABASE:', os.environ.get('PGDATABASE', 'Not set'))
+print('PGPORT:', os.environ.get('PGPORT', 'Not set'))
+"; then
+    echo "Database environment variables printed successfully"
 else
-    echo "Warning: Could not connect to database"
+    echo "Warning: Could not print database environment variables"
 fi
 
-# Run database initialization script
-echo "Initializing database..."
-python ./src/api/db_init.py
-
-# Run post-deployment script to ensure views are created
-echo "Running post-deployment tasks..."
-python ./post_deploy.py &
-POST_DEPLOY_PID=$!
-
-# Set default port if not provided
-export PORT="${PORT:-5000}"
+# Set default port if not provided - use 5432 which is the port Railway expects
+export PORT="${PORT:-5432}"
 echo "Using PORT: $PORT"
 
 # Enhanced port debugging before server starts
 echo "============== FINAL PORT CHECK =============="
 echo "FINAL PORT TO BE USED BY UVICORN: $PORT"
-echo "If this doesn't match Railway's service port setting (5000), update one of them"
 echo "=============================================="
-
-# Run port debug script
-echo "Running port debug script..."
-python ./src/api/port_debug.py
-
-# Install dependencies if needed
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python -m venv venv
-fi
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install or upgrade dependencies
-echo "Installing dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
 
 # Start the API server with WebSocket support
 echo "Starting web server with CORS and WebSocket support..."
 echo "Using PORT: $PORT"
-exec uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --log-level debug --ws-ping-interval 20 --ws-ping-timeout 30
+exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --log-level debug

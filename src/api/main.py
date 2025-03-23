@@ -255,6 +255,21 @@ try:
         logger.error(f"Failed to initialize database monitor: {str(e)}")
         logger.warning("Application will continue without database monitoring")
     
+    # Startup event to initialize database without blocking app startup
+    @app.on_event("startup")
+    async def startup_event():
+        """Initialize database on startup without blocking the app from starting"""
+        try:
+            # Run database initialization in a separate thread to avoid blocking
+            import threading
+            db_thread = threading.Thread(target=init_database)
+            db_thread.daemon = True  # Make thread a daemon so it doesn't block app shutdown
+            db_thread.start()
+            logger.info("Database initialization started in background thread")
+        except Exception as e:
+            logger.error(f"Error starting database initialization thread: {str(e)}")
+            # Continue app startup even if database initialization fails
+
     # Add a global on_startup handler to verify DB connection when app starts
     @app.on_event("startup")
     def startup_db_client():
