@@ -42,15 +42,25 @@ def get_database_url():
     # Get database URL from environment
     database_url = os.getenv("DATABASE_URL")
     
+    # Log all relevant environment variables for debugging
+    logger.info(f"DATABASE_URL exists: {database_url is not None}")
+    logger.info(f"PGHOST: {os.getenv('PGHOST', 'Not set')}")
+    logger.info(f"PGUSER: {os.getenv('PGUSER', 'Not set')}")
+    logger.info(f"PGDATABASE: {os.getenv('PGDATABASE', 'Not set')}")
+    logger.info(f"PGPORT: {os.getenv('PGPORT', 'Not set')}")
+    logger.info(f"RAILWAY_PUBLIC_DOMAIN: {os.getenv('RAILWAY_PUBLIC_DOMAIN', 'Not set')}")
+    
     # Important: Always replace railway.internal with the public hostname
     # This is needed because private networking appears to be failing
     if database_url and "railway.internal" in database_url:
+        logger.info("Detected internal Railway hostname in DATABASE_URL, replacing with public hostname")
+        
         # Extract the public hostname from PGHOST or DATABASE_URL
         pg_host = os.getenv("PGHOST")
         if pg_host and "railway.app" in pg_host:
             # Replace the internal hostname with the public one
             database_url = database_url.replace("postgres.railway.internal", pg_host)
-            logger.info("Replaced internal Railway hostname with public hostname")
+            logger.info(f"Replaced internal Railway hostname with PGHOST: {pg_host}")
         else:
             # If we can't find the public hostname, try to parse it from DATABASE_URL
             # The format is typically postgresql://user:pass@hostname:port/dbname
@@ -66,8 +76,24 @@ def get_database_url():
                     if external_url:
                         database_url = external_url
                         logger.info("Using EXTERNAL_DATABASE_URL as fallback")
+                    else:
+                        # Last resort: try to construct a URL from individual components
+                        pguser = os.getenv("PGUSER")
+                        pgpassword = os.getenv("PGPASSWORD")
+                        pgdatabase = os.getenv("PGDATABASE")
+                        pgport = os.getenv("PGPORT", "5432")
+                        
+                        if pguser and pgpassword and pgdatabase and pg_host:
+                            constructed_url = f"postgresql://{pguser}:{pgpassword}@{pg_host}:{pgport}/{pgdatabase}"
+                            database_url = constructed_url
+                            logger.info("Constructed database URL from individual components")
             except Exception as e:
                 logger.error(f"Error parsing database URL: {str(e)}")
+    
+    # Make sure we're using postgresql:// not postgres://
+    if database_url and database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        logger.info("Replaced 'postgres://' with 'postgresql://' in DATABASE_URL")
     
     # Log the final URL (with masked password)
     masked_url = mask_password(database_url) if database_url else "None"

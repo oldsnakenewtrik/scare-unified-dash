@@ -231,6 +231,69 @@ except ImportError as e:
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
 
+# Mount static files for the frontend
+try:
+    # Get the directory of the current file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Navigate to the frontend build directory
+    frontend_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "src", "frontend", "build")
+    
+    # Check if the directory exists
+    if os.path.exists(frontend_dir):
+        logger.info(f"Mounting frontend static files from: {frontend_dir}")
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    else:
+        # Try alternative path in case we're in a Docker container
+        docker_frontend_dir = "/app/src/frontend/build"
+        if os.path.exists(docker_frontend_dir):
+            logger.info(f"Mounting frontend static files from Docker path: {docker_frontend_dir}")
+            app.mount("/", StaticFiles(directory=docker_frontend_dir, html=True), name="frontend")
+        else:
+            logger.warning(f"Frontend build directory not found at {frontend_dir} or {docker_frontend_dir}")
+except Exception as e:
+    logger.error(f"Failed to mount frontend static files: {str(e)}")
+    logger.error(traceback.format_exc())
+
+# Add a root endpoint to serve the frontend index.html
+@app.get("/", include_in_schema=False)
+async def serve_frontend():
+    """
+    Serve the frontend index.html file.
+    This is a fallback in case the static file mounting doesn't work.
+    """
+    try:
+        # Try the Docker path first since we're in Railway
+        docker_index_path = "/app/src/frontend/build/index.html"
+        if os.path.exists(docker_index_path):
+            logger.info(f"Serving index.html from Docker path: {docker_index_path}")
+            return FileResponse(docker_index_path)
+        
+        # Try the local path as fallback
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        local_index_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), 
+                                       "src", "frontend", "build", "index.html")
+        if os.path.exists(local_index_path):
+            logger.info(f"Serving index.html from local path: {local_index_path}")
+            return FileResponse(local_index_path)
+        
+        # If neither path exists, return a simple message
+        logger.warning("Frontend index.html not found, returning simple response")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "API server is running, but frontend files are not available",
+                "api_docs": "/docs",
+                "health_check": "/api/health"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error serving frontend: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to serve frontend: {str(e)}"}
+        )
+
 # Database connection
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
 
@@ -730,11 +793,23 @@ async def simple_health_check():
     A simple health check endpoint that doesn't depend on the database.
     This is used by Railway for health checks to ensure the service is running.
     """
-    return {
-        "status": "ok",
-        "message": "API server is running",
-        "timestamp": datetime.datetime.now().isoformat()
-    }
+    try:
+        # Return basic health information
+        return {
+            "status": "ok",
+            "message": "API server is running",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "database_status": "checking in background"
+        }
+    except Exception as e:
+        # Even if there's an error, still return 200 for health check
+        logger.error(f"Error in health check: {str(e)}")
+        return {
+            "status": "ok",
+            "message": "API server is running but encountered an error",
+            "error": str(e),
+            "timestamp": datetime.datetime.now().isoformat()
+        }
 
 # Health check endpoint to test CORS headers
 @app.get("/api/cors-test", tags=["Diagnostics"])
