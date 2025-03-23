@@ -708,6 +708,19 @@ def health_check(db=Depends(get_db)):
     
     return health_status
 
+# Simple health check endpoint that doesn't depend on database
+@app.get("/api/health")
+async def simple_health_check():
+    """
+    A simple health check endpoint that doesn't depend on the database.
+    This is used by Railway for health checks to ensure the service is running.
+    """
+    return {
+        "status": "ok",
+        "message": "API server is running",
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
 # Health check endpoint to test CORS headers
 @app.get("/api/cors-test", tags=["Diagnostics"])
 async def test_cors(request: Request):
