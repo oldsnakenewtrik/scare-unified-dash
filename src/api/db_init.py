@@ -10,6 +10,9 @@ from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from dotenv import load_dotenv
 
+# Import the database configuration module
+from .db_config import get_database_url
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -20,11 +23,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("db_init")
 
-# Load environment variables
-load_dotenv()
+# Get database URL from the configuration module
+DATABASE_URL = get_database_url()
 
-# Get database URL from environment - add more fallbacks
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_DATABASE_URL") or "postgresql://scare_user:scare_password@postgres:5432/scare_metrics"
+# Log the database URL (masked) for debugging
+debug_url = DATABASE_URL
+if "://" in debug_url:
+    parts = debug_url.split("://")
+    if "@" in parts[1]:
+        userpass, hostdb = parts[1].split("@", 1)
+        if ":" in userpass:
+            user, password = userpass.split(":", 1)
+            debug_url = f"{parts[0]}://{user}:****@{hostdb}"
+logger.info(f"Using database URL: {debug_url}")
 
 def connect_with_retry(max_retries=5, delay=5):
     """Attempt to connect to the database with retries"""
