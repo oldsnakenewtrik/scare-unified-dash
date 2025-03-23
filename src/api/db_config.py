@@ -18,18 +18,7 @@ logger = logging.getLogger("db_config")
 
 def is_railway_environment():
     """Check if we're running in Railway environment"""
-    return os.getenv("RAILWAY_PROJECT_ID") is not None
-
-def is_host_reachable(host, port, timeout=3):
-    """Check if a host is reachable on a specific port"""
-    try:
-        socket.setdefaulttimeout(timeout)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
-        s.close()
-        return True
-    except Exception:
-        return False
+    return os.getenv("RAILWAY_PROJECT_ID") is not None or os.getenv("RAILWAY_ENVIRONMENT") is not None
 
 def get_database_url():
     """
@@ -48,52 +37,36 @@ def get_database_url():
     
     # Check if we're running in Railway
     in_railway = is_railway_environment()
+    logger.info(f"Running in Railway environment: {in_railway}")
     
     # Get database URL from environment
     database_url = os.getenv("DATABASE_URL")
     
-    # If we're running locally and the DATABASE_URL contains railway.internal,
-    # try to use the external connection string instead
-    if not in_railway and database_url and "railway.internal" in database_url:
-        logger.warning("Detected Railway internal URL while running locally")
+    # If we're in Railway, use the DATABASE_URL directly without modification
+    if in_railway:
+        logger.info("Using Railway environment DATABASE_URL")
+        if not database_url:
+            logger.error("No DATABASE_URL found in Railway environment")
+        return database_url
+    
+    # For local development
+    if not in_railway:
+        logger.info("Running in local development environment")
         
-        # Try different connection options
-        connection_options = [
-            # Option 1: Use EXTERNAL_DATABASE_URL if available
-            os.getenv("EXTERNAL_DATABASE_URL"),
-            
-            # Option 2: Use the public networking URL
-            "postgresql://postgres:HGnALEQyXYobjgWixRVpnfQBVXcfTXoF@postgres-production-07fa.up.railway.app:5432/railway",
-            
-            # Option 3: Use the proxy URL
-            "postgresql://postgres:HGnALEQyXYobjgWixRVpnfQBVXcfTXoF@nozomi.proxy.rlwy.net:11923/railway"
-        ]
-        
-        # Filter out None values
-        connection_options = [url for url in connection_options if url]
-        
-        # Try each connection option
-        for option in connection_options:
-            try:
-                # Extract host and port for reachability test
-                parts = option.split("://")[1].split("@")[1].split("/")[0]
-                if ":" in parts:
-                    host, port = parts.split(":")
-                    port = int(port)
-                else:
-                    host = parts
-                    port = 5432  # Default PostgreSQL port
-                
-                # Check if the host is reachable
-                if is_host_reachable(host, port):
-                    logger.info(f"Found reachable database at {host}:{port}")
-                    database_url = option
-                    break
-            except Exception as e:
-                logger.warning(f"Error checking connection option: {e}")
-        
+        # If DATABASE_URL contains railway.internal, try to use an external URL
         if database_url and "railway.internal" in database_url:
-            logger.warning("Could not find a working external connection, using original URL")
+            logger.warning("Detected Railway internal URL while running locally")
+            
+            # Try to use EXTERNAL_DATABASE_URL if available
+            external_url = os.getenv("EXTERNAL_DATABASE_URL")
+            if external_url:
+                logger.info("Using external database URL from EXTERNAL_DATABASE_URL")
+                database_url = external_url
+            else:
+                # Use the public networking URL
+                public_url = "postgresql://postgres:HGnALEQyXYobjgWixRVpnfQBVXcfTXoF@postgres-production-07fa.up.railway.app:5432/railway"
+                logger.info(f"Using public networking URL: {mask_password(public_url)}")
+                database_url = public_url
     
     # If no DATABASE_URL is found, use a default for local development
     if not database_url:
