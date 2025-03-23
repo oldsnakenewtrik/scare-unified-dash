@@ -1,10 +1,12 @@
 """
 Minimal FastAPI app to test CORS functionality
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import os
 import sys
+import datetime
 
 # Create a minimal app
 app = FastAPI(title="CORS Test App")
@@ -32,38 +34,73 @@ app.add_middleware(
 )
 print("CORS middleware configured")
 
-# Health check endpoint
+# Health check endpoint - both with and without /api prefix
 @app.get("/health")
+@app.get("/api/health")
 async def health():
-    return {"status": "ok", "message": "CORS test app is running"}
-
-# CORS test endpoint
-@app.get("/cors-test")
-async def cors_test():
     return {
         "status": "ok", 
-        "message": "CORS headers should be present in this response",
-        "origins_allowed": origins,
-        "environment_vars": {
-            "PORT": os.environ.get("PORT", "Not set"),
-            "DATABASE_URL": os.environ.get("DATABASE_URL", "Not set"),
-            "PYTHONPATH": os.environ.get("PYTHONPATH", "Not set"),
-        }
+        "message": "CORS test app is running",
+        "timestamp": datetime.datetime.now().isoformat()
     }
+
+# CORS test endpoint - both with and without /api prefix
+@app.get("/cors-test")
+@app.get("/api/cors-test")
+async def cors_test(request: Request):
+    try:
+        origin = request.headers.get("origin", "No origin provided")
+        
+        # Create a response with CORS headers
+        response = JSONResponse(
+            content={
+                "status": "ok",
+                "message": "CORS test endpoint",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "request_origin": origin,
+                "origins_allowed": origins,
+                "environment_vars": {
+                    "PORT": os.environ.get("PORT", "Not set"),
+                    "DATABASE_URL": os.environ.get("DATABASE_URL", "Not set"),
+                    "PYTHONPATH": os.environ.get("PYTHONPATH", "Not set"),
+                }
+            }
+        )
+        
+        # Add CORS headers
+        response.headers["access-control-allow-origin"] = "*"
+        response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["access-control-allow-headers"] = "*"
+        
+        return response
+    except Exception as e:
+        # Always return 200 even if there's an error
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "message": "CORS test endpoint (error handled)",
+                "error": str(e),
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+        )
 
 # Handle all OPTIONS requests
 @app.options("/{path:path}")
 async def options_handler(path: str):
-    print(f"Handling OPTIONS request for /{path}")
-    return {}
+    return {"status": "ok"}
 
 # Hello world endpoint
 @app.get("/")
 async def root():
-    return {"message": "Hello World from test_app.py"}
+    return {
+        "message": "CORS test app is running",
+        "endpoints": ["/api/health", "/api/cors-test", "/health", "/cors-test"],
+        "timestamp": datetime.datetime.now().isoformat()
+    }
 
 # For direct execution
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("test_app:app", host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port)

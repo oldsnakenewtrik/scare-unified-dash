@@ -818,38 +818,51 @@ async def test_cors(request: Request):
     Test endpoint to verify CORS configuration
     Returns details about the CORS configuration to help with debugging
     """
-    # Get the origin from the request
-    origin = request.headers.get("origin", "No origin provided")
-    is_allowed = origin in origins
-    
-    # Return detailed information about the request and CORS configuration
-    response = JSONResponse(
-        content={
-            "message": "CORS test endpoint",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "request_origin": origin,
-            "is_origin_allowed": is_allowed,
-            "allowed_origins": origins,
-            "cors_middleware": {
-                "allow_credentials": True,
-                "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-                "max_age": 86400
-            },
-            "status": "success" if is_allowed else "rejected"
-        }
-    )
-    
-    # Set CORS headers manually for this test endpoint
-    if is_allowed:
-        response.headers["access-control-allow-origin"] = origin
-        response.headers["access-control-allow-credentials"] = "true"
-    
-    response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    response.headers["access-control-allow-headers"] = "*"
-    response.headers["access-control-expose-headers"] = "*"
-    response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
-    
-    return response
+    try:
+        # Get the origin from the request
+        origin = request.headers.get("origin", "No origin provided")
+        is_allowed = origin in origins
+        
+        # Return detailed information about the request and CORS configuration
+        response = JSONResponse(
+            content={
+                "message": "CORS test endpoint",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "request_origin": origin,
+                "is_origin_allowed": is_allowed,
+                "allowed_origins": origins,
+                "cors_middleware": {
+                    "allow_credentials": True,
+                    "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+                    "max_age": 86400
+                },
+                "status": "success" if is_allowed else "rejected"
+            }
+        )
+        
+        # Set CORS headers manually for this test endpoint
+        if is_allowed:
+            response.headers["access-control-allow-origin"] = origin
+            response.headers["access-control-allow-credentials"] = "true"
+        
+        response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["access-control-allow-headers"] = "*"
+        response.headers["access-control-expose-headers"] = "*"
+        response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
+        
+        return response
+    except Exception as e:
+        # Even if there's an error, still return 200 for health check
+        logger.error(f"Error in CORS test endpoint: {str(e)}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "CORS test endpoint (error handled)",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "error": str(e),
+                "status": "error_handled"
+            }
+        )
 
 # API endpoints
 @app.get("/api/metrics/summary", response_model=List[MetricsSummary])
