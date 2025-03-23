@@ -24,7 +24,7 @@ def get_database_url():
     """
     Get the appropriate database URL based on the environment.
     For local development, use the external connection string.
-    For Railway deployment, use the internal connection string.
+    For Railway deployment, use the public connection string.
     """
     # Load environment variables - try .env.local first for local development
     local_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env.local')
@@ -42,40 +42,37 @@ def get_database_url():
     # Get database URL from environment
     database_url = os.getenv("DATABASE_URL")
     
-    # If we're in Railway, use the DATABASE_URL directly without modification
-    if in_railway:
-        logger.info("Using Railway environment DATABASE_URL")
-        if not database_url:
-            logger.error("No DATABASE_URL found in Railway environment")
-        return database_url
+    # Important: Always replace railway.internal with the public hostname
+    # This is needed because private networking appears to be failing
+    if database_url and "railway.internal" in database_url:
+        # Extract the public hostname from PGHOST or DATABASE_URL
+        pg_host = os.getenv("PGHOST")
+        if pg_host and "railway.app" in pg_host:
+            # Replace the internal hostname with the public one
+            database_url = database_url.replace("postgres.railway.internal", pg_host)
+            logger.info("Replaced internal Railway hostname with public hostname")
+        else:
+            # If we can't find the public hostname, try to parse it from DATABASE_URL
+            # The format is typically postgresql://user:pass@hostname:port/dbname
+            try:
+                # Get the public hostname from Railway environment variables
+                public_hostname = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+                if public_hostname:
+                    database_url = database_url.replace("postgres.railway.internal", public_hostname)
+                    logger.info(f"Using public hostname from RAILWAY_PUBLIC_DOMAIN: {public_hostname}")
+                else:
+                    # If all else fails, use a hardcoded public URL from our .env.local
+                    external_url = os.getenv("EXTERNAL_DATABASE_URL")
+                    if external_url:
+                        database_url = external_url
+                        logger.info("Using EXTERNAL_DATABASE_URL as fallback")
+            except Exception as e:
+                logger.error(f"Error parsing database URL: {str(e)}")
     
-    # For local development
-    if not in_railway:
-        logger.info("Running in local development environment")
-        
-        # If DATABASE_URL contains railway.internal, try to use an external URL
-        if database_url and "railway.internal" in database_url:
-            logger.warning("Detected Railway internal URL while running locally")
-            
-            # Try to use EXTERNAL_DATABASE_URL if available
-            external_url = os.getenv("EXTERNAL_DATABASE_URL")
-            if external_url:
-                logger.info("Using external database URL from EXTERNAL_DATABASE_URL")
-                database_url = external_url
-            else:
-                # Use the public networking URL
-                public_url = "postgresql://postgres:HGnALEQyXYobjgWixRVpnfQBVXcfTXoF@postgres-production-07fa.up.railway.app:5432/railway"
-                logger.info(f"Using public networking URL: {mask_password(public_url)}")
-                database_url = public_url
+    # Log the final URL (with masked password)
+    masked_url = mask_password(database_url) if database_url else "None"
+    logger.info(f"Using database URL: {masked_url}")
     
-    # If no DATABASE_URL is found, use a default for local development
-    if not database_url:
-        default_url = "postgresql://postgres:HGnALEQyXYobjgWixRVpnfQBVXcfTXoF@postgres-production-07fa.up.railway.app:5432/railway"
-        logger.warning(f"No DATABASE_URL found, using default: {mask_password(default_url)}")
-        database_url = default_url
-    
-    # Log the database URL (masked) for debugging
-    logger.info(f"Using database URL: {mask_password(database_url)}")
     return database_url
 
 def mask_password(url):
