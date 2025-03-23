@@ -1,12 +1,15 @@
 """
-Database configuration module for SCARE Unified Dashboard.
-Handles different database connection strings for local development and Railway deployment.
+Database configuration module for the SCARE Unified Dashboard API.
+This module handles database connection configuration and validation.
 """
 import os
+import re
 import sys
-import logging
+import time
 import socket
-from dotenv import load_dotenv
+import logging
+import traceback
+from urllib.parse import urlparse, parse_qs
 
 # Configure logging
 logging.basicConfig(
@@ -16,109 +19,212 @@ logging.basicConfig(
 )
 logger = logging.getLogger("db_config")
 
-def is_railway_environment():
-    """Check if we're running in Railway environment"""
-    return os.getenv("RAILWAY_PROJECT_ID") is not None or os.getenv("RAILWAY_ENVIRONMENT") is not None
-
-def get_database_url():
-    """
-    Get the appropriate database URL based on the environment.
-    For local development, use the external connection string.
-    For Railway deployment, use the public connection string.
-    """
-    # Load environment variables - try .env.local first for local development
-    local_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env.local')
-    if os.path.exists(local_env_path):
-        logger.info(f"Loading environment from {local_env_path}")
-        load_dotenv(local_env_path)
-    
-    # Then load regular .env file as fallback
-    load_dotenv()
-    
-    # Check if we're running in Railway
-    in_railway = is_railway_environment()
-    logger.info(f"Running in Railway environment: {in_railway}")
-    
-    # Get database URL from environment
-    database_url = os.getenv("DATABASE_URL")
-    
-    # Log all relevant environment variables for debugging
-    logger.info(f"DATABASE_URL exists: {database_url is not None}")
-    logger.info(f"PGHOST: {os.getenv('PGHOST', 'Not set')}")
-    logger.info(f"PGUSER: {os.getenv('PGUSER', 'Not set')}")
-    logger.info(f"PGDATABASE: {os.getenv('PGDATABASE', 'Not set')}")
-    logger.info(f"PGPORT: {os.getenv('PGPORT', 'Not set')}")
-    logger.info(f"RAILWAY_PUBLIC_DOMAIN: {os.getenv('RAILWAY_PUBLIC_DOMAIN', 'Not set')}")
-    
-    # Important: Always replace railway.internal with the public hostname
-    # This is needed because private networking appears to be failing
-    if database_url and "railway.internal" in database_url:
-        logger.info("Detected internal Railway hostname in DATABASE_URL, replacing with public hostname")
-        
-        # Extract the public hostname from PGHOST or DATABASE_URL
-        pg_host = os.getenv("PGHOST")
-        if pg_host and "railway.app" in pg_host:
-            # Replace the internal hostname with the public one
-            database_url = database_url.replace("postgres.railway.internal", pg_host)
-            logger.info(f"Replaced internal Railway hostname with PGHOST: {pg_host}")
-        else:
-            # If we can't find the public hostname, try to parse it from DATABASE_URL
-            # The format is typically postgresql://user:pass@hostname:port/dbname
-            try:
-                # Get the public hostname from Railway environment variables
-                public_hostname = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-                if public_hostname:
-                    database_url = database_url.replace("postgres.railway.internal", public_hostname)
-                    logger.info(f"Using public hostname from RAILWAY_PUBLIC_DOMAIN: {public_hostname}")
-                else:
-                    # If all else fails, use a hardcoded public URL from our .env.local
-                    external_url = os.getenv("EXTERNAL_DATABASE_URL")
-                    if external_url:
-                        database_url = external_url
-                        logger.info("Using EXTERNAL_DATABASE_URL as fallback")
-                    else:
-                        # Last resort: try to construct a URL from individual components
-                        pguser = os.getenv("PGUSER")
-                        pgpassword = os.getenv("PGPASSWORD")
-                        pgdatabase = os.getenv("PGDATABASE")
-                        pgport = os.getenv("PGPORT", "5432")
-                        
-                        if pguser and pgpassword and pgdatabase and pg_host:
-                            constructed_url = f"postgresql://{pguser}:{pgpassword}@{pg_host}:{pgport}/{pgdatabase}"
-                            database_url = constructed_url
-                            logger.info("Constructed database URL from individual components")
-            except Exception as e:
-                logger.error(f"Error parsing database URL: {str(e)}")
-    
-    # Make sure we're using postgresql:// not postgres://
-    if database_url and database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-        logger.info("Replaced 'postgres://' with 'postgresql://' in DATABASE_URL")
-    
-    # Log the final URL (with masked password)
-    masked_url = mask_password(database_url) if database_url else "None"
-    logger.info(f"Using database URL: {masked_url}")
-    
-    return database_url
-
 def mask_password(url):
-    """Mask the password in a database URL for logging"""
-    if not url or "://" not in url:
+    """
+    Mask the password in a database URL for safe logging
+    """
+    if not url:
+        return None
+    
+    try:
+        # Use regex to replace password in URL
+        masked_url = re.sub(r'(postgresql://[^:]+:)([^@]+)(@.*)', r'\1****\3', url)
+        return masked_url
+    except Exception as e:
+        logger.error(f"Error masking password in URL: {e}")
+        # Return a completely masked URL if there's an error
+        return "postgresql://****:****@****:****/*****"
+
+def validate_database_url(url):
+    """
+    Validate the format and components of a database URL
+    Returns (is_valid, error_message)
+    """
+    if not url:
+        return False, "Database URL is empty or None"
+    
+    try:
+        # Check if URL starts with postgresql://
+        if not url.startswith("postgresql://"):
+            return False, "Database URL must start with postgresql://"
+        
+        # Parse the URL
+        parsed = urlparse(url)
+        
+        # Check required components
+        if not parsed.hostname:
+            return False, "Database URL is missing hostname"
+        if not parsed.username:
+            return False, "Database URL is missing username"
+        if not parsed.password:
+            return False, "Database URL is missing password"
+        if not parsed.path or parsed.path == '/':
+            return False, "Database URL is missing database name"
+        
+        # Validate port if present
+        if parsed.port and (parsed.port < 1 or parsed.port > 65535):
+            return False, f"Invalid port number: {parsed.port}"
+        
+        return True, None
+    except Exception as e:
+        logger.error(f"Error validating database URL: {e}")
+        return False, f"Error validating database URL: {str(e)}"
+
+def test_database_connection(hostname, port, timeout=5):
+    """
+    Test TCP connection to the database server
+    Returns (is_connected, error_message)
+    """
+    logger.info(f"Testing TCP connection to database server at {hostname}:{port}")
+    
+    try:
+        # Create socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        
+        # Try to connect
+        start_time = time.time()
+        result = sock.connect_ex((hostname, port))
+        elapsed_time = time.time() - start_time
+        
+        # Close socket
+        sock.close()
+        
+        if result == 0:
+            logger.info(f"TCP connection successful (took {elapsed_time:.2f} seconds)")
+            return True, None
+        else:
+            error_msg = f"TCP connection failed with error code {result} (took {elapsed_time:.2f} seconds)"
+            logger.error(error_msg)
+            return False, error_msg
+    except socket.gaierror:
+        logger.error(f"Hostname resolution failed for {hostname}")
+        return False, f"Hostname resolution failed for {hostname}"
+    except socket.timeout:
+        logger.error(f"Connection timed out after {timeout} seconds")
+        return False, f"Connection timed out after {timeout} seconds"
+    except Exception as e:
+        logger.error(f"TCP connection error: {str(e)}")
+        return False, str(e)
+
+def add_ssl_params_if_needed(url):
+    """
+    Add SSL parameters to the database URL if needed
+    """
+    if not url:
         return url
     
     try:
-        parts = url.split("://")
-        if "@" in parts[1]:
-            userpass, hostdb = parts[1].split("@", 1)
-            if ":" in userpass:
-                user, password = userpass.split(":", 1)
-                return f"{parts[0]}://{user}:****@{hostdb}"
-    except Exception:
-        pass
+        # Parse the URL
+        parsed = urlparse(url)
+        
+        # Check if this is a Railway internal connection
+        is_railway_internal = parsed.hostname and "railway.internal" in parsed.hostname
+        
+        # Parse existing query parameters
+        query_params = parse_qs(parsed.query)
+        
+        # If it's a Railway internal connection, we may need to add SSL parameters
+        if is_railway_internal and "sslmode" not in query_params:
+            # Add SSL mode parameter
+            if parsed.query:
+                new_url = f"{url}&sslmode=require"
+            else:
+                new_url = f"{url}?sslmode=require"
+            
+            logger.info("Added SSL parameters to database URL for Railway internal connection")
+            return new_url
+        
+        return url
+    except Exception as e:
+        logger.error(f"Error adding SSL parameters to URL: {e}")
+        return url
+
+def get_database_url(test_connection=True):
+    """
+    Get the database URL from environment variables
+    Returns the database URL or None if not available
+    """
+    # Try to get the database URL from the environment
+    database_url = os.environ.get("DATABASE_URL")
     
-    return url
+    # If not found, try to construct it from individual components
+    if not database_url:
+        logger.warning("DATABASE_URL not found in environment variables")
+        
+        # Try to get individual components
+        host = os.environ.get("PGHOST")
+        user = os.environ.get("PGUSER")
+        password = os.environ.get("PGPASSWORD")
+        database = os.environ.get("PGDATABASE")
+        port = os.environ.get("PGPORT", "5432")
+        
+        # Check if we have all required components
+        if host and user and password and database:
+            database_url = f"postgresql://{user}:{password}@{host}:{port}/{database}"
+            logger.info("Constructed database URL from individual components")
+        else:
+            # Check if we have a Value environment variable (sometimes used in Railway)
+            value = os.environ.get("Value")
+            if value and value.startswith("postgresql://"):
+                database_url = value
+                logger.info("Using database URL from 'Value' environment variable")
+            else:
+                logger.error("Could not construct database URL from environment variables")
+                return None
+    
+    # Log masked URL for debugging
+    masked_url = mask_password(database_url)
+    logger.info(f"Using database URL: {masked_url}")
+    
+    # Validate the URL
+    is_valid, error = validate_database_url(database_url)
+    if not is_valid:
+        logger.error(f"Invalid database URL: {error}")
+        return None
+    
+    # Add SSL parameters if needed
+    database_url = add_ssl_params_if_needed(database_url)
+    
+    # Test the connection if requested
+    if test_connection:
+        try:
+            # Parse the URL
+            parsed = urlparse(database_url)
+            hostname = parsed.hostname
+            port = parsed.port or 5432
+            
+            # Test TCP connection
+            is_connected, error = test_database_connection(hostname, port)
+            if not is_connected:
+                logger.error(f"Database connection test failed: {error}")
+                # Return the URL anyway, as the application may retry later
+        except Exception as e:
+            logger.error(f"Error testing database connection: {e}")
+    
+    return database_url
+
+def get_engine_args():
+    """
+    Get additional arguments for SQLAlchemy engine creation
+    """
+    return {
+        "connect_args": {
+            "connect_timeout": 10,
+            "application_name": "SCARE Unified Dashboard API"
+        },
+        "pool_pre_ping": True,
+        "pool_recycle": 300,  # Recycle connections after 5 minutes
+        "pool_timeout": 30,
+        "pool_size": 5,
+        "max_overflow": 10
+    }
 
 # For testing
 if __name__ == "__main__":
-    url = get_database_url()
-    print(f"Database URL: {mask_password(url)}")
+    # Test the database configuration
+    database_url = get_database_url()
+    if database_url:
+        print(f"Database URL: {mask_password(database_url)}")
+    else:
+        print("No database URL available")
