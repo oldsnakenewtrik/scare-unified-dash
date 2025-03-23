@@ -8,6 +8,6 @@
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,
-    "startCommand": "python -m src.api.run_server"
+    "startCommand": "python -m src.api.health_app"
   }
 }
