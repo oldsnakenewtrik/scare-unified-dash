@@ -908,6 +908,7 @@ def get_metrics_summary(start_date: datetime.date, end_date: datetime.date, db=D
         metrics = [dict(row._mapping) for row in result]
         
         return metrics
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -935,6 +936,7 @@ def get_metrics_by_source(start_date: datetime.date, end_date: datetime.date, db
         metrics = [dict(row._mapping) for row in result]
         
         return metrics
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -963,6 +965,7 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
         metrics = [dict(row._mapping) for row in result]
         
         return metrics
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -1000,6 +1003,346 @@ def handle_db_error(error: Exception, operation: str):
                 "error_id": error_id,
                 "error_type": "database_error"
             }
+        )
+
+# Add the missing endpoints that match what the frontend is expecting
+@app.get("/api/campaigns-hierarchical", tags=["Campaigns"])
+async def get_campaigns_hierarchical(db=Depends(get_db)):
+    """
+    Get hierarchical campaign data including metrics 
+    """
+    try:
+        logger.info("Fetching hierarchical campaign data")
+        
+        # Query campaign data
+        query = text("""
+            SELECT 
+                cm.id, 
+                cm.source_system, 
+                cm.external_campaign_id,
+                cm.original_campaign_name,
+                cm.pretty_campaign_name,
+                cm.campaign_category,
+                cm.campaign_type,
+                cm.network,
+                cm.display_order,
+                COALESCE(SUM(cf.impressions), 0) AS impressions,
+                COALESCE(SUM(cf.clicks), 0) AS clicks,
+                COALESCE(SUM(cf.conversions), 0) AS conversions,
+                COALESCE(SUM(cf.spend), 0) AS cost
+            FROM campaign_mapping cm
+            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id 
+                AND cm.source_system = cf.source_system
+            WHERE cm.is_active = TRUE
+            GROUP BY 
+                cm.id, 
+                cm.source_system, 
+                cm.external_campaign_id,
+                cm.original_campaign_name,
+                cm.pretty_campaign_name,
+                cm.campaign_category,
+                cm.campaign_type,
+                cm.network,
+                cm.display_order
+            ORDER BY cm.display_order, cm.pretty_campaign_name
+        """)
+        
+        result = db.execute(query)
+        campaigns = []
+        
+        for row in result:
+            campaign = {
+                "id": row.id,
+                "source_system": row.source_system,
+                "external_campaign_id": row.external_campaign_id,
+                "original_campaign_name": row.original_campaign_name,
+                "pretty_campaign_name": row.pretty_campaign_name,
+                "campaign_category": row.campaign_category,
+                "campaign_type": row.campaign_type,
+                "network": row.network,
+                "display_order": row.display_order,
+                "impressions": row.impressions,
+                "clicks": row.clicks,
+                "conversions": float(row.conversions) if row.conversions else 0,
+                "cost": float(row.cost) if row.cost else 0
+            }
+            campaigns.append(campaign)
+        
+        return campaigns
+        
+    except SQLAlchemyError as e:
+        raise handle_db_error(e, "fetching hierarchical campaign data")
+    except Exception as e:
+        logger.error(f"Error fetching hierarchical campaign data: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching hierarchical campaign data: {str(e)}"
+        )
+
+@app.get("/api/campaigns-performance", tags=["Campaigns"])
+async def get_campaigns_performance(
+    start_date: datetime.date, 
+    end_date: datetime.date,
+    db=Depends(get_db)
+):
+    """
+    Get campaign performance data for a specific date range
+    """
+    try:
+        logger.info(f"Fetching campaign performance data for {start_date} to {end_date}")
+        
+        # Query campaign performance data
+        query = text("""
+            SELECT 
+                cf.campaign_id,
+                cf.campaign_name,
+                cf.source_system,
+                cf.date,
+                cf.impressions,
+                cf.clicks,
+                cf.spend,
+                cf.revenue,
+                cf.conversions,
+                CASE WHEN cf.clicks > 0 THEN cf.spend / cf.clicks ELSE 0 END AS cpc
+            FROM campaign_fact cf
+            WHERE cf.date BETWEEN :start_date AND :end_date
+            ORDER BY cf.date DESC, cf.campaign_name
+        """)
+        
+        result = db.execute(query, {
+            "start_date": start_date,
+            "end_date": end_date
+        })
+        
+        campaigns = []
+        for row in result:
+            campaign = {
+                "campaign_id": row.campaign_id,
+                "campaign_name": row.campaign_name,
+                "source_system": row.source_system,
+                "date": row.date.isoformat(),
+                "impressions": row.impressions,
+                "clicks": row.clicks,
+                "spend": float(row.spend) if row.spend else 0,
+                "revenue": float(row.revenue) if row.revenue else 0,
+                "conversions": float(row.conversions) if row.conversions else 0,
+                "cpc": float(row.cpc) if row.cpc else 0
+            }
+            campaigns.append(campaign)
+        
+        return campaigns
+        
+    except SQLAlchemyError as e:
+        raise handle_db_error(e, "fetching campaign performance data")
+    except Exception as e:
+        logger.error(f"Error fetching campaign performance data: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching campaign performance data: {str(e)}"
+        )
+
+@app.get("/api/campaign-mappings", tags=["Campaigns"])
+async def get_campaign_mappings(db=Depends(get_db)):
+    """
+    Get all campaign mappings
+    """
+    try:
+        logger.info("Fetching campaign mappings")
+        
+        # Query campaign mappings
+        query = text("""
+            SELECT 
+                id,
+                source_system,
+                external_campaign_id,
+                original_campaign_name,
+                pretty_campaign_name,
+                campaign_category,
+                campaign_type,
+                network,
+                pretty_network,
+                pretty_source,
+                display_order,
+                is_active,
+                created_at,
+                updated_at
+            FROM campaign_mapping
+            ORDER BY display_order, pretty_campaign_name
+        """)
+        
+        result = db.execute(query)
+        
+        mappings = []
+        for row in result:
+            mapping = dict(row._mapping)
+            # Convert datetime objects to ISO strings for JSON serialization
+            if 'created_at' in mapping and mapping['created_at']:
+                mapping['created_at'] = mapping['created_at'].isoformat()
+            if 'updated_at' in mapping and mapping['updated_at']:
+                mapping['updated_at'] = mapping['updated_at'].isoformat()
+            
+            mappings.append(mapping)
+        
+        return mappings
+        
+    except SQLAlchemyError as e:
+        raise handle_db_error(e, "fetching campaign mappings")
+    except Exception as e:
+        logger.error(f"Error fetching campaign mappings: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching campaign mappings: {str(e)}"
+        )
+
+@app.post("/api/campaign-mappings", tags=["Campaigns"])
+async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
+    """
+    Create a new campaign mapping
+    """
+    try:
+        logger.info(f"Creating campaign mapping for {mapping.source_system}/{mapping.external_campaign_id}")
+        
+        # Insert the new mapping
+        query = text("""
+            INSERT INTO campaign_mapping (
+                source_system,
+                external_campaign_id,
+                original_campaign_name,
+                pretty_campaign_name,
+                campaign_category,
+                campaign_type,
+                network,
+                pretty_network,
+                pretty_source,
+                display_order,
+                is_active
+            ) VALUES (
+                :source_system,
+                :external_campaign_id,
+                :original_campaign_name,
+                :pretty_campaign_name,
+                :campaign_category,
+                :campaign_type,
+                :network,
+                :pretty_network,
+                :pretty_source,
+                :display_order,
+                TRUE
+            )
+            RETURNING id
+        """)
+        
+        result = db.execute(query, {
+            "source_system": mapping.source_system,
+            "external_campaign_id": mapping.external_campaign_id,
+            "original_campaign_name": mapping.original_campaign_name,
+            "pretty_campaign_name": mapping.pretty_campaign_name,
+            "campaign_category": mapping.campaign_category,
+            "campaign_type": mapping.campaign_type,
+            "network": mapping.network,
+            "pretty_network": mapping.pretty_network,
+            "pretty_source": mapping.pretty_source,
+            "display_order": mapping.display_order or 999
+        })
+        
+        # Commit the transaction
+        db.commit()
+        
+        # Get the new ID
+        new_id = result.fetchone()[0]
+        
+        return {"id": new_id, "message": "Campaign mapping created successfully"}
+        
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise handle_db_error(e, "creating campaign mapping")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating campaign mapping: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating campaign mapping: {str(e)}"
+        )
+
+@app.post("/api/campaign-order", tags=["Campaigns"])
+async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
+    """
+    Update display order for multiple campaigns
+    """
+    try:
+        logger.info(f"Updating display order for {len(orders)} campaigns")
+        
+        # Update each campaign's display order
+        for order in orders:
+            query = text("""
+                UPDATE campaign_mapping
+                SET display_order = :display_order
+                WHERE id = :id
+            """)
+            
+            db.execute(query, {
+                "id": order.id,
+                "display_order": order.display_order
+            })
+        
+        # Commit the transaction
+        db.commit()
+        
+        return {"message": f"Updated display order for {len(orders)} campaigns"}
+        
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise handle_db_error(e, "updating campaign display order")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating campaign display order: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating campaign display order: {str(e)}"
+        )
+
+@app.post("/api/campaign-mappings/archive", tags=["Campaigns"])
+async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=Depends(get_db)):
+    """
+    Archive a campaign mapping
+    """
+    try:
+        logger.info(f"Archiving campaign mapping with ID {mapping_id}")
+        
+        # Update the mapping to set is_active = FALSE
+        query = text("""
+            UPDATE campaign_mapping
+            SET is_active = FALSE
+            WHERE id = :id
+            RETURNING id
+        """)
+        
+        result = db.execute(query, {"id": mapping_id})
+        
+        # Check if any row was affected
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Campaign mapping with ID {mapping_id} not found"
+            )
+        
+        # Commit the transaction
+        db.commit()
+        
+        return {"message": f"Campaign mapping with ID {mapping_id} archived successfully"}
+        
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise handle_db_error(e, f"archiving campaign mapping with ID {mapping_id}")
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error archiving campaign mapping: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error archiving campaign mapping: {str(e)}"
         )
 
 # Add a new database test endpoint
@@ -1178,5 +1521,3 @@ def reconnect_database():
                 "error_id": error_id
             }
         )
-
-# ... rest of your code remains the same ...
