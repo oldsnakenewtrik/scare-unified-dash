@@ -249,7 +249,7 @@ def create_engine_with_retry(database_url, **kwargs):
     
     # Force IPv4 connectivity which is more reliable with Railway proxy
     if "options" not in kwargs["connect_args"]:
-        kwargs["connect_args"]["options"] = "-c statement_timeout=60000 -c prefer_ipv4=true"
+        kwargs["connect_args"]["options"] = "-c statement_timeout=60000"
     
     # Set SSL mode to prefer if not already set
     # This allows SSL connections but doesn't require them
@@ -294,18 +294,17 @@ def get_engine_args():
     return {
         "connect_args": {
             "connect_timeout": 60,
-            "application_name": "SCARE Unified Dashboard API",
+            "application_name": "SCARE Unified Dashboard",
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
             "keepalives_count": 5,
-            "options": "-c statement_timeout=60000"
+            "options": "-c statement_timeout=60000",
+            "sslmode": "prefer"
         },
         "pool_pre_ping": True,
         "pool_recycle": 300,  # Recycle connections after 5 minutes
-        "pool_timeout": 30,
-        "pool_size": 5,
-        "max_overflow": 10
+        "pool_timeout": 30
     }
 
 # For testing
