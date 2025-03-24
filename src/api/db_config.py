@@ -174,7 +174,24 @@ def get_database_url(test_connection=False):
     in_railway = is_railway_environment()
     logger.info(f"Running in Railway environment: {in_railway}")
     
-    # Get the database URL from environment variables
+    # CRITICAL SECTION: If we're in Railway, FORCE the use of the internal hostname
+    # This bypasses any issues with variable interpolation in Railway
+    if in_railway:
+        # Get the raw environment variables we need
+        pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres"
+        pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD") or ""
+        pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
+        railway_private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN")
+        
+        if railway_private_domain:
+            logger.info(f"Using RAILWAY_PRIVATE_DOMAIN: {railway_private_domain}")
+            # Directly build the internal URL
+            internal_url = f"postgresql://{pg_user}:{pg_password}@{railway_private_domain}:5432/{pg_database}?sslmode=require"
+            masked_url = mask_password(internal_url)
+            logger.info(f"Using directly constructed internal URL: {masked_url}")
+            return internal_url
+    
+    # If we're not in Railway or couldn't construct an internal URL, use normal logic
     database_url = os.getenv("DATABASE_URL")
     
     # In Railway, check if we can construct an internal URL
