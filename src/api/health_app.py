@@ -37,18 +37,53 @@ app.add_middleware(
 )
 logger.info("CORS middleware configured")
 
+# CRITICAL FIX: Directly set DATABASE_URL to use internal networking
+if os.environ.get("RAILWAY_ENVIRONMENT_NAME") is not None or os.environ.get("RAILWAY_ENVIRONMENT") is not None:
+    # Get credentials from environment variables
+    pg_user = os.environ.get("POSTGRES_USER") or os.environ.get("PGUSER") or "postgres"
+    pg_password = os.environ.get("POSTGRES_PASSWORD") or os.environ.get("PGPASSWORD", "")
+    pg_database = os.environ.get("POSTGRES_DB") or os.environ.get("PGDATABASE") or "railway"
+    
+    # Set a guaranteed internal URL
+    internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
+    logger.info(f"Setting DATABASE_URL to use internal networking: postgresql://{pg_user}:****@postgres.railway.internal:5432/{pg_database}")
+    os.environ["DATABASE_URL"] = internal_url
+    
+    # Force PGHOST to be the internal hostname
+    os.environ["PGHOST"] = "postgres.railway.internal"
+    logger.info("Environment variables set to use internal networking")
+
 # Try to import the main application
 main_app = None
 try:
     logger.info("Attempting to import main application...")
-    # Add the parent directory to sys.path if needed
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
+    # Add the current directory and parent directories to sys.path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    project_dir = os.path.dirname(parent_dir)
     
-    # Import the main app
-    from src.api.main import app as main_app
-    logger.info("Successfully imported main application")
+    # Add all possible paths to ensure imports work
+    for path in [current_dir, parent_dir, project_dir]:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    
+    logger.info(f"Python path: {sys.path}")
+    
+    # Try different import approaches
+    try:
+        # First try relative import
+        from .main import app as main_app
+        logger.info("Successfully imported main application using relative import")
+    except ImportError:
+        try:
+            # Then try absolute import
+            from src.api.main import app as main_app
+            logger.info("Successfully imported main application using absolute import")
+        except ImportError:
+            # Finally try direct import
+            import main
+            main_app = main.app
+            logger.info("Successfully imported main application using direct import")
 except Exception as e:
     logger.error(f"Error importing main application: {str(e)}")
     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -311,21 +346,18 @@ if __name__ == "__main__":
     # Parse the port, with fallback to 8000
     if port_str is None:
         port = 8000
-        logger.info(f"PORT environment variable not set, using default: {port}")
     else:
         try:
             port = int(port_str)
-            logger.info(f"Using PORT from environment: {port}")
+            # If the port is 5432 (PostgreSQL's default port), use a different port
+            if port == 5432:
+                logger.warning("PORT is set to 5432, which is PostgreSQL's default port. Using port 8000 instead to avoid conflicts.")
+                port = 8000
         except ValueError:
-            # If PORT is not a valid integer, use default
+            logger.error(f"Invalid PORT value: {port_str}. Using default port 8000.")
             port = 8000
-            logger.warning(f"Invalid PORT value: {port_str!r}, using default: {port}")
     
-    # Log all environment variables for debugging (excluding sensitive ones)
-    safe_env = {k: v for k, v in os.environ.items() 
-               if not any(secret in k.lower() for secret in ['password', 'secret', 'key', 'token'])}
-    logger.info(f"Environment variables: {safe_env}")
+    logger.info(f"Using PORT from environment: {port}")
     
-    # Start the server
-    logger.info(f"Starting health check server on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    # Run the server
+    uvicorn.run(app, host="0.0.0.0", port=port)
