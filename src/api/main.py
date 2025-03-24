@@ -75,8 +75,15 @@ else:
         masked_url = database_public_url.replace(database_public_url.split("@")[0].split("://")[1], "****")
         logger.info(f"Set DATABASE_URL to: {masked_url}")
 
-# Set up the FastAPI application
-app = FastAPI(title="SCARE Unified Metrics API")
+# Initialize the FastAPI app
+app = FastAPI(
+    title="SCARE Unified Dashboard API",
+    description="API for the SCARE Unified Dashboard",
+    version="0.1.0"
+)
+
+# Debug print to verify app initialization
+print("DEBUG: FastAPI app initialized!")
 
 # CRITICAL FIX: Configure CORS with permissive settings
 logger.info("EXTREMELY CRITICAL CORS FIX: Configured to allow all origins")
@@ -960,48 +967,15 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Create a function to handle database errors consistently
-def handle_db_error(error: Exception, operation: str):
-    """Handle database errors consistently across endpoints"""
-    error_id = str(uuid.uuid4())
-    error_msg = str(error)
-    logger.error(f"Database error during {operation} [ID: {error_id}]: {error_msg}")
-    logger.error(traceback.format_exc())
-    
-    if "Network is unreachable" in error_msg or "Could not connect to server" in error_msg:
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "detail": "Database connection failed. This may be due to network connectivity issues.",
-                "error_id": error_id,
-                "error_type": "database_unreachable"
-            }
-        )
-    elif "does not exist" in error_msg and ("relation" in error_msg or "table" in error_msg):
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "detail": "Required database tables do not exist. Database initialization may not have completed.",
-                "error_id": error_id,
-                "error_type": "missing_tables"
-            }
-        )
-    else:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": "An unexpected database error occurred. Please try again later.",
-                "error_id": error_id,
-                "error_type": "database_error"
-            }
-        )
-
 # Add the missing endpoints that match what the frontend is expecting
 @app.get("/api/campaigns-hierarchical", tags=["Campaigns"])
 async def get_campaigns_hierarchical(db=Depends(get_db)):
     """
     Get hierarchical campaign data including metrics 
     """
+    # Debug print to confirm this route is registered
+    print("DEBUG: campaigns-hierarchical route was imported and registered!")
+    
     try:
         logger.info("Fetching hierarchical campaign data")
         
@@ -1079,6 +1053,9 @@ async def get_campaigns_performance(
     """
     Get campaign performance data for a specific date range
     """
+    # Debug print to confirm this route is registered
+    print("DEBUG: campaigns-performance route was imported and registered!")
+    
     try:
         logger.info(f"Fetching campaign performance data for {start_date} to {end_date}")
         
@@ -1141,6 +1118,9 @@ async def get_campaign_metrics(
     """
     Alias for campaigns-performance to match frontend API calls
     """
+    # Debug print to confirm this route is registered
+    print("DEBUG: campaign-metrics route was imported and registered!")
+    
     logger.info(f"campaign-metrics endpoint called, forwarding to campaigns-performance")
     # Reuse the campaigns-performance endpoint
     return await get_campaigns_performance(start_date, end_date, db)
@@ -1347,6 +1327,42 @@ async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=D
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error archiving campaign mapping: {str(e)}"
+        )
+
+# Create a function to handle database errors consistently
+def handle_db_error(error: Exception, operation: str):
+    """Handle database errors consistently across endpoints"""
+    error_id = str(uuid.uuid4())
+    error_msg = str(error)
+    logger.error(f"Database error during {operation} [ID: {error_id}]: {error_msg}")
+    logger.error(traceback.format_exc())
+    
+    if "Network is unreachable" in error_msg or "Could not connect to server" in error_msg:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": "Database connection failed. This may be due to network connectivity issues.",
+                "error_id": error_id,
+                "error_type": "database_unreachable"
+            }
+        )
+    elif "does not exist" in error_msg and ("relation" in error_msg or "table" in error_msg):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": "Required database tables do not exist. Database initialization may not have completed.",
+                "error_id": error_id,
+                "error_type": "missing_tables"
+            }
+        )
+    else:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An unexpected database error occurred. Please try again later.",
+                "error_id": error_id,
+                "error_type": "database_error"
+            }
         )
 
 # Add a new database test endpoint
