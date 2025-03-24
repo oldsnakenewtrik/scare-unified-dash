@@ -98,6 +98,15 @@ app.add_middleware(
     expose_headers=["Content-Type", "X-Process-Time"],
 )
 
+# Import and include the health check router
+try:
+    from .health_check import router as health_check_router
+    app.include_router(health_check_router)
+    print("DEBUG: Health check routes registered successfully")
+except Exception as e:
+    logger.error(f"Failed to import health check router: {str(e)}")
+    print(f"DEBUG ERROR: Failed to import health check router: {str(e)}")
+
 # Add middleware to log all requests and add CORS headers
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
@@ -230,59 +239,32 @@ except ImportError as e:
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
 
-# Mount static files for the frontend
-try:
-    # Get the directory of the current file
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+# Debug print to verify mount order
+print("DEBUG: About to mount static files")
+
+# FIXED: Mount static files at /static instead of root path to avoid intercepting API routes
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "build")
+if os.path.exists(frontend_dir):
+    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+    print(f"DEBUG: Static files mounted at /static from {frontend_dir}")
+else:
+    print(f"DEBUG: Frontend build directory not found at {frontend_dir}")
+
+# Add a catch-all route to serve index.html for client-side routing
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    # Skip API paths - let them 404 naturally if not defined
+    if full_path.startswith("api/"):
+        return {"error": "API endpoint not found", "path": full_path, "status_code": 404}
     
-    # Navigate to the frontend build directory
-    frontend_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "src", "frontend", "build")
-    
-    # Check if the directory exists
-    if os.path.exists(frontend_dir):
-        logger.info(f"Mounting frontend static files from: {frontend_dir}")
-        # Mount static files at /static instead of root to prevent intercepting API routes
-        app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
-        
-        # Add a catch-all route to serve the React app's index.html for client-side routing
-        @app.get("/{full_path:path}")
-        async def serve_frontend(full_path: str):
-            # Skip API paths - let them be handled by their respective handlers
-            if full_path.startswith("api/"):
-                raise HTTPException(status_code=404, detail="API endpoint not found")
-                
-            # For all other paths, serve the React app's index.html
-            index_path = os.path.join(frontend_dir, "index.html")
-            if os.path.exists(index_path):
-                return FileResponse(index_path)
-            else:
-                raise HTTPException(status_code=404, detail="Frontend not built")
+    # For any other path, serve the frontend index.html
+    index_path = os.path.join(frontend_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     else:
-        # Try alternative path in case we're in a Docker container
-        docker_frontend_dir = "/app/src/frontend/build"
-        if os.path.exists(docker_frontend_dir):
-            logger.info(f"Mounting frontend static files from Docker path: {docker_frontend_dir}")
-            # Mount static files at /static instead of root to prevent intercepting API routes
-            app.mount("/static", StaticFiles(directory=docker_frontend_dir), name="static")
-            
-            # Add a catch-all route to serve the React app's index.html for client-side routing
-            @app.get("/{full_path:path}")
-            async def serve_frontend(full_path: str):
-                # Skip API paths - let them be handled by their respective handlers
-                if full_path.startswith("api/"):
-                    raise HTTPException(status_code=404, detail="API endpoint not found")
-                    
-                # For all other paths, serve the React app's index.html
-                index_path = os.path.join(docker_frontend_dir, "index.html")
-                if os.path.exists(index_path):
-                    return FileResponse(index_path)
-                else:
-                    raise HTTPException(status_code=404, detail="Frontend not built")
-        else:
-            logger.warning(f"Frontend build directory not found at {frontend_dir} or {docker_frontend_dir}")
-except Exception as e:
-    logger.error(f"Failed to mount frontend static files: {str(e)}")
-    logger.error(traceback.format_exc())
+        return {"error": "Frontend not built", "status_code": 404}
+
+print("DEBUG: All routes registered, ready to handle requests")
 
 # Database connection
 DATABASE_URL = get_database_url()
