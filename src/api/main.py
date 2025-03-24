@@ -49,48 +49,61 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# CRITICAL FIX: Handle Railway's variable interpolation issue
-database_url = os.getenv("DATABASE_URL", "")
-logger.info(f"Raw DATABASE_URL: {database_url}")
-
-# Check if DATABASE_URL is actually a template variable that wasn't interpolated
-if not database_url or "${" in database_url:
-    logger.warning("DATABASE_URL is either empty or contains uninterpolated template variables")
+# EMERGENCY FIX: Hardcode the database URL directly
+# This bypasses any issues with variable interpolation
+database_public_url = os.getenv("DATABASE_PUBLIC_URL")
+if database_public_url:
+    logger.info("CRITICAL FIX: Setting DATABASE_URL directly from DATABASE_PUBLIC_URL")
+    masked_url = database_public_url.replace(database_public_url.split("@")[0].split("://")[1], "****")
+    os.environ["DATABASE_URL"] = database_public_url
+    logger.info(f"DATABASE_URL set to: {masked_url}")
+else:
+    logger.warning("DATABASE_PUBLIC_URL not available - trying to construct connection URL manually")
+    # Get credentials from environment variables
+    pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres" 
+    pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
+    pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
     
-    # First try to use DATABASE_PUBLIC_URL
-    public_url = os.getenv("DATABASE_PUBLIC_URL")
-    if public_url:
-        logger.info("Using DATABASE_PUBLIC_URL as fallback")
-        os.environ["DATABASE_URL"] = public_url
-    # Otherwise, if in Railway, construct internal URL
-    elif os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT"):
-        # Get credentials from environment variables
-        pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres"
-        pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
-        pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
-        
-        # Construct internal URL
-        logger.info("Constructing internal DATABASE_URL")
-        internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
-        os.environ["DATABASE_URL"] = internal_url
-        logger.info("DATABASE_URL set to use internal networking")
+    # Construct connection URL
+    internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
+    masked_url = internal_url.replace(f"{pg_user}:{pg_password}", f"{pg_user}:****")
+    os.environ["DATABASE_URL"] = internal_url
+    logger.info(f"DATABASE_URL set to internal URL: {masked_url}")
 
-# Log all important environment variables for debugging (masked for security)
-safe_db_url = os.getenv("DATABASE_URL", "Not set")
-if safe_db_url and ":" in safe_db_url:
-    parts = safe_db_url.split(":")
-    for i, part in enumerate(parts):
-        if "@" in part:
-            # This part contains the password
-            password_parts = part.split("@")
-            parts[i] = "****@" + password_parts[1]
-    safe_db_url = ":".join(parts)
-
-logger.info(f"Final DATABASE_URL (masked): {safe_db_url}")
-logger.info(f"RAILWAY_PRIVATE_DOMAIN: {os.getenv('RAILWAY_PRIVATE_DOMAIN', 'Not set')}")
+# Log all important environment variables for debugging
+current_url = os.getenv('DATABASE_URL', 'Not set')
+if current_url != 'Not set':
+    parts = current_url.split('@')
+    if len(parts) > 1:
+        auth_part = parts[0].split('://')
+        if len(auth_part) > 1:
+            masked_url = f"{auth_part[0]}://{auth_part[1].split(':')[0]}:****@{parts[1]}"
+            logger.info(f"Final DATABASE_URL (masked): {masked_url}")
+        else:
+            logger.info(f"Final DATABASE_URL: {current_url}")
+    else:
+        logger.info(f"Final DATABASE_URL: {current_url}")
+else:
+    logger.info(f"Final DATABASE_URL: Not set")
 
 # Set up the FastAPI application
 app = FastAPI(title="SCARE Unified Metrics API")
+
+# CRITICAL FIX: Configure CORS with permissive settings
+logger.info("Configuring CORS middleware with permissive settings for frontend access")
+origins = [
+    "https://front-production-f6e6.up.railway.app",  # Frontend URL
+    "http://localhost:3000",                         # Local development
+    "*",                                            # Allow all origins temporarily
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Define allowed origins - allow specific domains and Railway frontend
 origins = [
@@ -99,17 +112,6 @@ origins = [
     "http://localhost:5000",  # Local development with dev server
     "http://localhost:5001"   # Local development with alt port
 ]
-
-# Add CORS middleware directly to the main app
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,  # Allow cookies and credentials
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=86400,  # Cache preflight for 24 hours
-)
 
 # Add middleware to log all requests and add CORS headers
 @app.middleware("http")
