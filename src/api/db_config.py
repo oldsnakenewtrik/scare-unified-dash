@@ -10,6 +10,7 @@ import socket
 import logging
 import traceback
 from urllib.parse import urlparse, parse_qs
+from sqlalchemy import create_engine
 
 # Configure logging
 logging.basicConfig(
@@ -77,34 +78,45 @@ def test_database_connection(hostname, port, timeout=5):
     """
     logger.info(f"Testing TCP connection to database server at {hostname}:{port}")
     
+    # Skip hostname resolution test if we're in Railway and using internal hostnames
+    if os.environ.get("RAILWAY_ENVIRONMENT_NAME") and (
+        "railway.internal" in hostname or 
+        "postgres.railway.internal" == hostname or
+        hostname.endswith(".up.railway.app")
+    ):
+        logger.info(f"Skipping connection test for Railway internal hostname: {hostname}")
+        return True, None
+    
     try:
         # Create socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         
-        # Try to connect
-        start_time = time.time()
-        result = sock.connect_ex((hostname, port))
-        elapsed_time = time.time() - start_time
+        # Resolve hostname to IP address
+        try:
+            ip_address = socket.gethostbyname(hostname)
+            logger.info(f"Resolved {hostname} to {ip_address}")
+        except socket.gaierror:
+            logger.error(f"Hostname resolution failed for {hostname}")
+            return False, f"Hostname resolution failed for {hostname}"
         
-        # Close socket
+        # Try to connect
+        result = sock.connect_ex((ip_address, port))
         sock.close()
         
         if result == 0:
-            logger.info(f"TCP connection successful (took {elapsed_time:.2f} seconds)")
+            logger.info(f"Successfully connected to {hostname}:{port}")
             return True, None
         else:
-            error_msg = f"TCP connection failed with error code {result} (took {elapsed_time:.2f} seconds)"
+            error_msg = f"Connection failed with error code {result}"
             logger.error(error_msg)
             return False, error_msg
-    except socket.gaierror:
-        logger.error(f"Hostname resolution failed for {hostname}")
-        return False, f"Hostname resolution failed for {hostname}"
+            
     except socket.timeout:
-        logger.error(f"Connection timed out after {timeout} seconds")
+        logger.error(f"Connection to {hostname}:{port} timed out after {timeout} seconds")
         return False, f"Connection timed out after {timeout} seconds"
     except Exception as e:
-        logger.error(f"TCP connection error: {str(e)}")
+        logger.error(f"Error testing connection to {hostname}:{port}: {str(e)}")
         return False, str(e)
 
 def add_ssl_params_if_needed(url):
@@ -118,21 +130,25 @@ def add_ssl_params_if_needed(url):
         # Parse the URL
         parsed = urlparse(url)
         
-        # Check if this is a Railway internal connection
+        # Check if this is a Railway environment
+        is_railway = os.environ.get("RAILWAY_ENVIRONMENT_NAME") is not None
+        
+        # Check if this is a Railway internal connection or public connection
         is_railway_internal = parsed.hostname and "railway.internal" in parsed.hostname
+        is_railway_public = parsed.hostname and ".up.railway.app" in parsed.hostname
         
         # Parse existing query parameters
         query_params = parse_qs(parsed.query)
         
-        # If it's a Railway internal connection, we may need to add SSL parameters
-        if is_railway_internal and "sslmode" not in query_params:
+        # If it's a Railway connection and no SSL mode is specified, add it
+        if (is_railway or is_railway_internal or is_railway_public) and "sslmode" not in query_params:
             # Add SSL mode parameter
             if parsed.query:
                 new_url = f"{url}&sslmode=require"
             else:
                 new_url = f"{url}?sslmode=require"
             
-            logger.info("Added SSL parameters to database URL for Railway internal connection")
+            logger.info("Added SSL parameters to database URL for Railway connection")
             return new_url
         
         return url
@@ -140,69 +156,133 @@ def add_ssl_params_if_needed(url):
         logger.error(f"Error adding SSL parameters to URL: {e}")
         return url
 
-def get_database_url(test_connection=True):
+def is_railway_environment():
+    """Check if we're running in Railway environment."""
+    return os.environ.get("RAILWAY_ENVIRONMENT_NAME") is not None or os.environ.get("RAILWAY_ENVIRONMENT") is not None
+
+def get_database_url(test_connection=False):
     """
     Get the database URL from environment variables
-    Returns the database URL or None if not available
     """
-    # Try to get the database URL from the environment
-    database_url = os.environ.get("DATABASE_URL")
+    # Check if we're running in Railway environment
+    in_railway = is_railway_environment()
+    logger.info(f"Running in Railway environment: {in_railway}")
     
-    # If not found, try to construct it from individual components
+    # Get the database URL from environment variables
+    database_url = os.getenv("DATABASE_URL")
+    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
+    
+    # When in Railway, prioritize the internal DATABASE_URL which should use postgres.railway.internal
+    if in_railway and database_url and "postgres.railway.internal" in database_url:
+        logger.info("Using internal Railway networking with postgres.railway.internal")
+    # For local development or cross-project access, use DATABASE_PUBLIC_URL if available
+    elif database_public_url:
+        logger.info("Using DATABASE_PUBLIC_URL for external access")
+        database_url = database_public_url
+    else:
+        logger.info("Using DATABASE_URL (fallback)")
+    
     if not database_url:
-        logger.warning("DATABASE_URL not found in environment variables")
-        
-        # Try to get individual components
-        host = os.environ.get("PGHOST")
-        user = os.environ.get("PGUSER")
-        password = os.environ.get("PGPASSWORD")
-        database = os.environ.get("PGDATABASE")
-        port = os.environ.get("PGPORT", "5432")
-        
-        # Check if we have all required components
-        if host and user and password and database:
-            database_url = f"postgresql://{user}:{password}@{host}:{port}/{database}"
-            logger.info("Constructed database URL from individual components")
-        else:
-            # Check if we have a Value environment variable (sometimes used in Railway)
-            value = os.environ.get("Value")
-            if value and value.startswith("postgresql://"):
-                database_url = value
-                logger.info("Using database URL from 'Value' environment variable")
-            else:
-                logger.error("Could not construct database URL from environment variables")
-                return None
+        logger.error("No database URL available")
+        return None
     
     # Log masked URL for debugging
     masked_url = mask_password(database_url)
     logger.info(f"Using database URL: {masked_url}")
     
-    # Validate the URL
-    is_valid, error = validate_database_url(database_url)
-    if not is_valid:
-        logger.error(f"Invalid database URL: {error}")
-        return None
-    
     # Add SSL parameters if needed
     database_url = add_ssl_params_if_needed(database_url)
     
     # Test the connection if requested
-    if test_connection:
+    if test_connection and database_url:
         try:
             # Parse the URL
             parsed = urlparse(database_url)
             hostname = parsed.hostname
             port = parsed.port or 5432
             
-            # Test TCP connection
-            is_connected, error = test_database_connection(hostname, port)
-            if not is_connected:
-                logger.error(f"Database connection test failed: {error}")
-                # Return the URL anyway, as the application may retry later
+            # Skip connection test for internal Railway hostnames
+            if hostname and "railway.internal" in hostname:
+                logger.info(f"Skipping connection test for internal Railway hostname: {hostname}")
+            else:
+                # Test TCP connection
+                is_connected, error = test_database_connection(hostname, port)
+                if not is_connected:
+                    logger.error(f"Database connection test failed: {error}")
+                    # Return the URL anyway, as the application may retry later
         except Exception as e:
             logger.error(f"Error testing database connection: {e}")
     
     return database_url
+
+def create_engine_with_retry(database_url, **kwargs):
+    """
+    Create a SQLAlchemy engine with retry logic
+    
+    Args:
+        database_url: The database URL to connect to
+        **kwargs: Additional arguments to pass to create_engine
+        
+    Returns:
+        SQLAlchemy engine
+    """
+    # Ensure connect_args is present
+    if "connect_args" not in kwargs:
+        kwargs["connect_args"] = {}
+    
+    # Set application name for easier identification in PostgreSQL logs
+    kwargs["connect_args"]["application_name"] = "SCARE Unified Dashboard"
+    
+    # Set connect timeout if not already set - use 60 seconds to allow for slow networks
+    if "connect_timeout" not in kwargs["connect_args"]:
+        kwargs["connect_args"]["connect_timeout"] = 60
+    
+    # Add keepalives to prevent connection closures
+    if "keepalives" not in kwargs["connect_args"]:
+        kwargs["connect_args"]["keepalives"] = 1
+        kwargs["connect_args"]["keepalives_idle"] = 30
+        kwargs["connect_args"]["keepalives_interval"] = 10
+        kwargs["connect_args"]["keepalives_count"] = 5
+    
+    # Force IPv4 connectivity which is more reliable with Railway proxy
+    if "options" not in kwargs["connect_args"]:
+        kwargs["connect_args"]["options"] = "-c statement_timeout=60000 -c prefer_ipv4=true"
+    
+    # Set SSL mode to prefer if not already set
+    # This allows SSL connections but doesn't require them
+    if "sslmode" not in kwargs["connect_args"]:
+        kwargs["connect_args"]["sslmode"] = "prefer"
+    
+    # Add pool settings for better connection handling
+    if "pool_pre_ping" not in kwargs:
+        kwargs["pool_pre_ping"] = True
+    if "pool_recycle" not in kwargs:
+        kwargs["pool_recycle"] = 300  # Recycle connections after 5 minutes
+    if "pool_timeout" not in kwargs:
+        kwargs["pool_timeout"] = 30  # Wait up to 30 seconds for a connection
+    
+    # Log connection parameters for debugging
+    masked_url = mask_password(database_url)
+    logger.info(f"Creating SQLAlchemy engine with URL: {masked_url}")
+    logger.info(f"Connection arguments: {kwargs}")
+    
+    # Extract hostname for logging
+    hostname = None
+    try:
+        parsed = urlparse(database_url)
+        hostname = parsed.hostname
+        port = parsed.port
+        logger.info(f"Connecting to host: {hostname}:{port}")
+    except Exception as e:
+        logger.error(f"Error parsing URL: {e}")
+    
+    # Create engine
+    try:
+        engine = create_engine(database_url, **kwargs)
+        return engine
+    except Exception as e:
+        logger.error(f"Error creating engine: {e}")
+        raise
 
 def get_engine_args():
     """
@@ -210,8 +290,13 @@ def get_engine_args():
     """
     return {
         "connect_args": {
-            "connect_timeout": 10,
-            "application_name": "SCARE Unified Dashboard API"
+            "connect_timeout": 60,
+            "application_name": "SCARE Unified Dashboard API",
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+            "options": "-c statement_timeout=60000"
         },
         "pool_pre_ping": True,
         "pool_recycle": 300,  # Recycle connections after 5 minutes

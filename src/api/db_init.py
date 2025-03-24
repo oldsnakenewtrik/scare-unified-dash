@@ -2,6 +2,7 @@
 Database initialization module for the SCARE Unified Dashboard API.
 This module handles database connection, table creation, and migrations.
 """
+
 import os
 import sys
 import time
@@ -9,8 +10,6 @@ import logging
 import traceback
 from sqlalchemy import create_engine, text, MetaData, Table, Column, inspect
 from sqlalchemy.exc import SQLAlchemyError, OperationalError, ProgrammingError
-
-from db_config import get_database_url, get_engine_args, mask_password
 
 # Configure logging
 logging.basicConfig(
@@ -20,61 +19,183 @@ logging.basicConfig(
 )
 logger = logging.getLogger("db_init")
 
+# Try different import approaches for db_config
+try:
+    # First try relative import
+    from .db_config import get_database_url, get_engine_args, mask_password, create_engine_with_retry
+    logger.info("Imported db_config using relative import")
+except (ImportError, NameError):
+    try:
+        # Then try absolute import
+        from src.api.db_config import get_database_url, get_engine_args, mask_password, create_engine_with_retry
+        logger.info("Imported db_config using absolute import")
+    except ImportError:
+        # Finally try direct import
+        from db_config import get_database_url, get_engine_args, mask_password, create_engine_with_retry
+        logger.info("Imported db_config using direct import")
+
 def connect_with_retry(max_retries=5, delay=5):
     """
-    Attempt to connect to the database with retries
-    Returns (engine, connection) tuple or (None, None) if connection fails
+    Connect to the database with retry logic
+    
+    Args:
+        max_retries: Maximum number of retries
+        delay: Delay between retries in seconds
+        
+    Returns:
+        SQLAlchemy engine or None if connection failed
     """
-    database_url = get_database_url(test_connection=True)
+    from .db_config import get_database_url, create_engine_with_retry
+    
+    # Get the database URL
+    database_url = get_database_url()
     if not database_url:
-        logger.error("No valid database URL available")
-        return None, None
+        logger.error("No database URL available")
+        return None
     
-    masked_url = mask_password(database_url)
-    logger.info(f"Connecting to database: {masked_url}")
-    
-    # Get engine arguments
-    engine_args = get_engine_args()
-    
-    # Create engine
-    engine = create_engine(database_url, **engine_args)
-    
-    # Try to connect with retries
-    for attempt in range(max_retries):
+    # Try to connect with retry
+    for attempt in range(1, max_retries + 1):
         try:
-            logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
-            connection = engine.connect()
+            logger.info(f"Database connection attempt {attempt}/{max_retries}")
+            
+            # Create engine with retry logic
+            engine = create_engine_with_retry(database_url, 
+                connect_args={
+                    "connect_timeout": 60,
+                    "application_name": "SCARE Unified Dashboard",
+                    "keepalives": 1,
+                    "keepalives_idle": 30,
+                    "keepalives_interval": 10,
+                    "keepalives_count": 5,
+                    "options": "-c statement_timeout=60000 -c prefer_ipv4=true",
+                    "sslmode": "prefer"
+                })
             
             # Test the connection
-            result = connection.execute(text("SELECT 1")).fetchone()
-            if result and result[0] == 1:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
                 logger.info("Database connection successful")
-                return engine, connection
-            else:
-                logger.error("Database connection test query failed")
-                if connection:
-                    connection.close()
-        except OperationalError as e:
-            logger.error(f"Database connection failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            if "could not connect to server" in str(e).lower():
-                logger.error("Network connectivity issue detected")
-            elif "authentication failed" in str(e).lower():
-                logger.error("Authentication failed - check username and password")
-            elif "database" in str(e).lower() and "does not exist" in str(e).lower():
-                logger.error("Database does not exist - check database name")
-        except SQLAlchemyError as e:
-            logger.error(f"SQLAlchemy error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                return engine
+                
         except Exception as e:
-            logger.error(f"Unexpected error (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Wait before retrying
-        if attempt < max_retries - 1:
-            logger.info(f"Retrying in {delay} seconds...")
-            time.sleep(delay)
+            logger.error(f"Error connecting to database (attempt {attempt}): {e}")
+            
+            # For errors with the Railway internal connection, try fallback to public URL
+            # but ONLY if we're NOT already using a public URL
+            if attempt == max_retries // 2 and "postgres.railway.internal" in database_url:
+                public_url = os.getenv("DATABASE_PUBLIC_URL")
+                if public_url and "up.railway.app" in public_url:
+                    logger.warning("Internal connection failed, trying DATABASE_PUBLIC_URL as fallback")
+                    database_url = public_url
+                    # Reset attempt counter to give the public URL a fair chance
+                    attempt = 0
+                    continue
+            
+            if attempt < max_retries:
+                logger.info(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
     
     logger.error(f"Failed to connect to database after {max_retries} attempts")
-    return None, None
+    return None
+
+def ensure_network_column_exists():
+    """
+    Ensure that the network column exists in the sm_fact_bing_ads table
+    
+    This function checks if the network column exists in the sm_fact_bing_ads table
+    and adds it if it doesn't exist
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    logger.info("Checking if network column exists in sm_fact_bing_ads table")
+    
+    # Connect to the database
+    engine = connect_with_retry()
+    if not engine:
+        logger.error("Failed to connect to database, cannot check or add network column")
+        return False
+    
+    try:
+        with engine.connect() as conn:
+            # Create migrations table if it doesn't exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS migrations (
+                    id SERIAL PRIMARY KEY,
+                    migration_name VARCHAR(255) NOT NULL UNIQUE,
+                    applied_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            
+            # Check if migration has already been applied
+            migration_result = conn.execute(text("""
+                SELECT COUNT(*) FROM migrations 
+                WHERE migration_name = '005_add_network_to_bing_ads'
+            """)).fetchone()
+            
+            if migration_result and migration_result[0] > 0:
+                logger.info("Migration 005_add_network_to_bing_ads already applied")
+                return True
+            
+            # Check if the network column exists
+            column_exists_result = conn.execute(text("""
+                SELECT COUNT(*) FROM information_schema.columns 
+                WHERE table_schema = 'public' 
+                AND table_name = 'sm_fact_bing_ads' 
+                AND column_name = 'network'
+            """)).fetchone()
+            
+            column_exists = column_exists_result and column_exists_result[0] > 0
+            
+            if column_exists:
+                logger.info("Network column already exists in sm_fact_bing_ads table")
+                
+                # Record the migration as applied
+                conn.execute(text("""
+                    INSERT INTO migrations (migration_name)
+                    VALUES ('005_add_network_to_bing_ads')
+                    ON CONFLICT (migration_name) DO NOTHING
+                """))
+                
+                return True
+            else:
+                logger.info("Network column does not exist in sm_fact_bing_ads table, adding it")
+                
+                # Add the network column
+                try:
+                    # Start a transaction
+                    with conn.begin():
+                        # Add the network column
+                        conn.execute(text("""
+                            ALTER TABLE public.sm_fact_bing_ads
+                            ADD COLUMN network VARCHAR(50) DEFAULT 'Search'
+                        """))
+                        
+                        # Update existing records
+                        conn.execute(text("""
+                            UPDATE public.sm_fact_bing_ads
+                            SET network = 'Search'
+                            WHERE network IS NULL
+                        """))
+                        
+                        # Record the migration as applied
+                        conn.execute(text("""
+                            INSERT INTO migrations (migration_name)
+                            VALUES ('005_add_network_to_bing_ads')
+                            ON CONFLICT (migration_name) DO NOTHING
+                        """))
+                    
+                    logger.info("Successfully added network column to sm_fact_bing_ads table")
+                    return True
+                except Exception as e:
+                    logger.error(f"Error adding network column to sm_fact_bing_ads table: {e}")
+                    return False
+    except Exception as e:
+        logger.error(f"Error checking or adding network column: {e}")
+        return False
+    finally:
+        # Close the engine
+        engine.dispose()
 
 def check_table_exists(connection, table_name):
     """
@@ -300,16 +421,16 @@ def run_migrations(connection):
             {
                 "name": "005_add_network_to_bing_ads",
                 "sql": """
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns 
-                            WHERE table_name = 'sm_fact_bing_ads' AND column_name = 'network'
-                        ) THEN
-                            ALTER TABLE sm_fact_bing_ads ADD COLUMN network VARCHAR(50) DEFAULT 'Search';
-                        END IF;
-                    END
-                    $$;
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'sm_fact_bing_ads' AND column_name = 'network'
+                    ) THEN
+                        ALTER TABLE sm_fact_bing_ads ADD COLUMN network VARCHAR(50) DEFAULT 'Search';
+                    END IF;
+                END
+                $$;
                 """
             }
         ]
@@ -331,19 +452,18 @@ def initialize_database():
     """
     try:
         # Connect to the database
-        engine, connection = connect_with_retry()
-        if not engine or not connection:
+        engine = connect_with_retry()
+        if not engine:
             logger.error("Failed to connect to database")
             return None, None
         
         # Run migrations
-        if not run_migrations(connection):
+        if not run_migrations(engine.connect()):
             logger.error("Failed to run migrations")
-            connection.close()
             return None, None
         
         logger.info("Database initialized successfully")
-        return engine, connection
+        return engine, engine.connect()
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
