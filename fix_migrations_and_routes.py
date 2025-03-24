@@ -56,15 +56,15 @@ def fix_migrations_table():
         table_exists = cursor.fetchone()[0]
         
         if table_exists:
-            # Check if name column exists
-            cursor.execute("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'migrations' AND column_name = 'name')")
-            name_column_exists = cursor.fetchone()[0]
+            # Check if migration_name column exists
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'migrations' AND column_name = 'migration_name')")
+            migration_name_column_exists = cursor.fetchone()[0]
             
-            if name_column_exists:
-                print("Migrations table already has 'name' column. No fix needed.")
+            if migration_name_column_exists:
+                print("Migrations table already has 'migration_name' column. No fix needed.")
                 return
             
-            print("Migrations table exists but doesn't have 'name' column. Recreating table...")
+            print("Migrations table exists but doesn't have 'migration_name' column. Recreating table...")
         else:
             print("Migrations table doesn't exist. Creating it...")
         
@@ -74,12 +74,12 @@ def fix_migrations_table():
         
         CREATE TABLE migrations (
             id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
+            migration_name VARCHAR(255) NOT NULL,
             applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         
         -- Insert records for migrations that have already been applied
-        INSERT INTO migrations (name) VALUES 
+        INSERT INTO migrations (migration_name) VALUES 
         ('001_create_sm_fact_bing_ads'),
         ('002_create_sm_fact_google_ads'),
         ('003_create_campaign_mappings'),
