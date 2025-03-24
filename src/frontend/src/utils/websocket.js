@@ -10,9 +10,10 @@ const getWebSocketUrl = () => {
   // If we're in the production environment
   if (process.env.NODE_ENV === 'production') {
     // Use the backend service URL with the WebSocket protocol
-    // FIXED: Don't include port (8000) in production URLs for Railway
+    // CRITICAL: Don't include port (8000) in production URLs for Railway
     // Railway only allows connections through standard ports (80/443)
-    return `${protocol}//scare-unified-dash-production.up.railway.app/ws`;
+    const hostname = window.location.hostname || 'scare-unified-dash-production.up.railway.app';
+    return `${protocol}//${hostname}/ws`;
   }
   
   // For local development
@@ -28,7 +29,8 @@ const getFallbackUrl = () => {
   // If we're in the production environment
   if (process.env.NODE_ENV === 'production') {
     // Don't specify a port - use the default port for the protocol
-    return `${protocol}//scare-unified-dash-production.up.railway.app/api/ws-fallback`;
+    const hostname = window.location.hostname || 'scare-unified-dash-production.up.railway.app';
+    return `${protocol}//${hostname}/api/ws-fallback`;
   }
   
   // For local development

@@ -51,23 +51,61 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     });
     console.log('Direct API call succeeded');
     
-    // FIXED: Ensure we always return an array for these specific endpoints
+    // IMPROVED: Better handling of API responses for campaign endpoints
     // This fixes the "TypeError: response.data.filter is not a function" and similar errors
-    if ((endpoint.includes('campaigns-hierarchical') || endpoint.includes('campaign-mappings')) 
-        && response.data && !Array.isArray(response.data)) {
-      console.log('Converting API response to array format');
+    if (endpoint.includes('campaigns-hierarchical') || endpoint.includes('campaign-mappings') || endpoint.includes('campaign-metrics')) {
+      console.log('Processing API response', endpoint);
       
-      // Check if the response data has a property that's an array
-      const possibleArrayProps = Object.keys(response.data).filter(key => 
-        Array.isArray(response.data[key])
-      );
-      
-      if (possibleArrayProps.length > 0) {
-        // Use the first array property found
-        response.data = response.data[possibleArrayProps[0]];
+      if (!response.data) {
+        // If response.data is null or undefined, use empty array
+        console.warn('Response data is null or undefined, using empty array');
+        response.data = [];
+      } else if (Array.isArray(response.data)) {
+        // Already an array, no conversion needed
+        console.log('Response data is already an array with', response.data.length, 'items');
+      } else if (typeof response.data === 'object') {
+        // It's an object, check if it has any array properties
+        console.log('Response data is an object, looking for array properties');
+        
+        // First check for common array property names
+        const commonArrayProps = ['data', 'campaigns', 'items', 'results', 'records'];
+        let foundArrayProp = null;
+        
+        for (const prop of commonArrayProps) {
+          if (response.data[prop] && Array.isArray(response.data[prop])) {
+            foundArrayProp = prop;
+            break;
+          }
+        }
+        
+        // If common properties not found, check all properties
+        if (!foundArrayProp) {
+          const possibleArrayProps = Object.keys(response.data).filter(key => 
+            Array.isArray(response.data[key])
+          );
+          
+          if (possibleArrayProps.length > 0) {
+            foundArrayProp = possibleArrayProps[0];
+          }
+        }
+        
+        if (foundArrayProp) {
+          console.log(`Found array property '${foundArrayProp}' with`, response.data[foundArrayProp].length, 'items');
+          response.data = response.data[foundArrayProp];
+        } else {
+          // If no array properties found, convert the object to an array with the object as the only item
+          // This handles the case where the API returns a single campaign object
+          if (Object.keys(response.data).length > 0) {
+            console.log('No array properties found, but object has data. Creating single-item array.');
+            response.data = [response.data];
+          } else {
+            console.warn('Empty object response, using empty array');
+            response.data = [];
+          }
+        }
       } else {
-        // If we can't find an array property, force it to be an empty array
-        console.warn('Could not find array property in response, using empty array');
+        // Not an array or object, use empty array
+        console.warn('Response data is not an array or object, using empty array');
         response.data = [];
       }
     }
