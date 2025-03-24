@@ -75,7 +75,7 @@ def connect_with_retry(max_retries=5, delay=5):
                     "keepalives_idle": 30,
                     "keepalives_interval": 10,
                     "keepalives_count": 5,
-                    "options": "-c statement_timeout=60000 -c prefer_ipv4=true",
+                    "options": "-c statement_timeout=60000",
                     "sslmode": "prefer"
                 })
             

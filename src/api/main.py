@@ -1030,7 +1030,7 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 COALESCE(SUM(cf.clicks), 0) AS clicks,
                 COALESCE(SUM(cf.conversions), 0) AS conversions,
                 COALESCE(SUM(cf.spend), 0) AS cost
-            FROM campaign_mapping cm
+            FROM campaign_mappings cm
             LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id 
                 AND cm.source_system = cf.source_system
             WHERE cm.is_active = TRUE
@@ -1141,6 +1141,19 @@ async def get_campaigns_performance(
             detail=f"Error fetching campaign performance data: {str(e)}"
         )
 
+@app.get("/api/campaign-metrics", tags=["Campaigns"])
+async def get_campaign_metrics(
+    start_date: datetime.date, 
+    end_date: datetime.date,
+    db=Depends(get_db)
+):
+    """
+    Alias for campaigns-performance to match frontend API calls
+    """
+    logger.info(f"campaign-metrics endpoint called, forwarding to campaigns-performance")
+    # Reuse the campaigns-performance endpoint
+    return await get_campaigns_performance(start_date, end_date, db)
+
 @app.get("/api/campaign-mappings", tags=["Campaigns"])
 async def get_campaign_mappings(db=Depends(get_db)):
     """
@@ -1166,7 +1179,7 @@ async def get_campaign_mappings(db=Depends(get_db)):
                 is_active,
                 created_at,
                 updated_at
-            FROM campaign_mapping
+            FROM campaign_mappings
             ORDER BY display_order, pretty_campaign_name
         """)
         
@@ -1204,7 +1217,7 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
         
         # Insert the new mapping
         query = text("""
-            INSERT INTO campaign_mapping (
+            INSERT INTO campaign_mappings (
                 source_system,
                 external_campaign_id,
                 original_campaign_name,
@@ -1275,7 +1288,7 @@ async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(ge
         # Update each campaign's display order
         for order in orders:
             query = text("""
-                UPDATE campaign_mapping
+                UPDATE campaign_mappings
                 SET display_order = :display_order
                 WHERE id = :id
             """)
@@ -1311,7 +1324,7 @@ async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=D
         
         # Update the mapping to set is_active = FALSE
         query = text("""
-            UPDATE campaign_mapping
+            UPDATE campaign_mappings
             SET is_active = FALSE
             WHERE id = :id
             RETURNING id
