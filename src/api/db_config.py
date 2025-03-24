@@ -166,31 +166,47 @@ def get_database_url(test_connection=False):
     in_railway = is_railway_environment()
     logger.info(f"Running in Railway environment: {in_railway}")
     
-    if in_railway:
-        # HARD-CODED INTERNAL CONNECTION - THIS IS THE ONLY WAY
-        logger.info("Forcing internal connection for Railway environment")
+    # CRITICAL FIX: First get the full DATABASE_URL to extract password
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        masked_url = mask_password(database_url)
+        logger.info(f"Found DATABASE_URL: {masked_url}")
         
-        # Get credentials from environment variables
-        pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres"
-        pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
+        # Extract password from DATABASE_URL
+        try:
+            parsed = urlparse(database_url)
+            username = parsed.username or "postgres"
+            password = parsed.password
+            logger.info(f"Extracted username: {username}")
+            if password:
+                logger.info("Successfully extracted password from DATABASE_URL")
+            else:
+                logger.warning("No password found in DATABASE_URL")
+        except Exception as e:
+            logger.error(f"Error parsing DATABASE_URL: {e}")
+            username = "postgres"
+            password = ""
+    else:
+        username = "postgres"
+        password = ""
+        logger.warning("No DATABASE_URL found")
+    
+    if in_railway:
+        # CRITICAL FIX - Use extracted password in internal URL
+        logger.info("CRITICAL FIX: Using extracted credentials with Railway internal connection")
+        
+        # Use extracted credentials or fall back to environment variables
+        pg_user = username or os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres"
+        pg_password = password or os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
         pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
         
-        # Log all environment variables that might be useful for debugging
-        for env_var in ["PGHOST", "PGPORT", "RAILWAY_PRIVATE_DOMAIN", "RAILWAY_PUBLIC_DOMAIN", "DATABASE_URL"]:
-            value = os.getenv(env_var)
-            if value:
-                if "PASSWORD" in env_var or "password" in str(value).lower():
-                    value = "****"
-                logger.info(f"Environment variable {env_var}: {value}")
-        
-        # Force use of postgres.railway.internal - this is the standard internal hostname
+        # Force internal hostname but use extracted credentials
         internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
         masked_url = mask_password(internal_url)
-        logger.info(f"Using HARD-CODED internal URL: {masked_url}")
+        logger.info(f"Using internal URL with extracted credentials: {masked_url}")
         return internal_url
     
     # Local development - use DATABASE_URL or fall back to localhost
-    database_url = os.getenv("DATABASE_URL")
     if not database_url:
         default_url = "postgresql://postgres:postgres@localhost:5432/postgres"
         logger.warning(f"No DATABASE_URL found. Using default local URL: {default_url}")

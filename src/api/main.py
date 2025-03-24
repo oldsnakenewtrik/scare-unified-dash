@@ -51,158 +51,68 @@ load_dotenv()
 
 # EMERGENCY FIX: Hardcode the database URL directly
 # This bypasses any issues with variable interpolation
-database_public_url = os.getenv("DATABASE_PUBLIC_URL")
-if database_public_url:
-    logger.info("CRITICAL FIX: Setting DATABASE_URL directly from DATABASE_PUBLIC_URL")
-    masked_url = database_public_url.replace(database_public_url.split("@")[0].split("://")[1], "****")
-    os.environ["DATABASE_URL"] = database_public_url
-    logger.info(f"DATABASE_URL set to: {masked_url}")
-else:
-    logger.warning("DATABASE_PUBLIC_URL not available - trying to construct connection URL manually")
-    
-    # CRITICAL: Get password from Railway environment
-    # Look for all possible password environment variables
-    pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres" 
-    pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD")
-    
-    # If password is still not found, try to extract from other variables
-    if not pg_password:
-        logger.warning("No explicit database password found. Trying to extract from Railway service variables.")
-        # Try to extract from RAILWAY_POSTGRES_URL if available
-        postgres_url = os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("PG_DATABASE_URL")
-        if postgres_url and '@' in postgres_url:
-            try:
-                # Extract password from URL format postgresql://user:password@host:port/db
-                auth_part = postgres_url.split('@')[0].split('://')[1]
-                pg_password = auth_part.split(':')[1]
-                logger.info("Successfully extracted password from RAILWAY_POSTGRES_URL")
-            except Exception as e:
-                logger.error(f"Failed to extract password from URL: {e}")
-    
-    # If still no password, check if there's a default Railway password
-    if not pg_password:
-        railway_private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN")
-        if railway_private_domain:
-            logger.info("Using Railway default password mechanism")
-            pg_password = "password"  # Railway sometimes uses default passwords
-    
-    # Final fallback 
-    if not pg_password:
-        logger.error("ERROR: No database password found in any environment variable!")
-        pg_password = ""  # Empty as a last resort
-    
-    pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
-    
-    # Construct connection URL
-    internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
-    masked_url = internal_url.replace(f"{pg_user}:{pg_password}", f"{pg_user}:****")
-    os.environ["DATABASE_URL"] = internal_url
-    logger.info(f"DATABASE_URL set to internal URL: {masked_url}")
-
-# Log all important environment variables for debugging
-current_url = os.getenv('DATABASE_URL', 'Not set')
-if current_url != 'Not set':
-    parts = current_url.split('@')
+logger.info("EXTREMELY CRITICAL DB FIX: Using existing DATABASE_URL")
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    # Mask the password for logging (extract just the password part)
+    parts = database_url.split('@')
     if len(parts) > 1:
         auth_part = parts[0].split('://')
         if len(auth_part) > 1:
             masked_url = f"{auth_part[0]}://{auth_part[1].split(':')[0]}:****@{parts[1]}"
-            logger.info(f"Final DATABASE_URL (masked): {masked_url}")
+            logger.info(f"DATABASE_URL already set to: {masked_url}")
         else:
-            logger.info(f"Final DATABASE_URL: {current_url}")
+            logger.info(f"DATABASE_URL has unexpected format. Using as is.")
     else:
-        logger.info(f"Final DATABASE_URL: {current_url}")
+        logger.info(f"DATABASE_URL has unexpected format. Using as is.")
 else:
-    logger.info(f"Final DATABASE_URL: Not set")
+    logger.error("CRITICAL ERROR: DATABASE_URL environment variable is not set!")
+    # Attempt to create it from other environment variables as a last resort
+    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
+    if database_public_url:
+        logger.info("Using DATABASE_PUBLIC_URL as fallback")
+        os.environ["DATABASE_URL"] = database_public_url
+        masked_url = database_public_url.replace(database_public_url.split("@")[0].split("://")[1], "****")
+        logger.info(f"Set DATABASE_URL to: {masked_url}")
 
 # Set up the FastAPI application
 app = FastAPI(title="SCARE Unified Metrics API")
 
 # CRITICAL FIX: Configure CORS with permissive settings
-logger.info("Configuring CORS middleware with permissive settings for frontend access")
-origins = [
-    "https://front-production-f6e6.up.railway.app",  # Frontend URL
-    "http://localhost:3000",                         # Local development
-    "*",                                            # Allow all origins temporarily
-]
+logger.info("EXTREMELY CRITICAL CORS FIX: Configured to allow all origins")
 
+# Use FastAPI's built-in CORS middleware with correct settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when using wildcard origins
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["Content-Type", "X-Process-Time"],
 )
-
-# Define allowed origins - allow specific domains and Railway frontend
-origins = [
-    "https://front-production-f6e6.up.railway.app",  # Railway frontend
-    "http://localhost:3000",  # Local development frontend
-    "http://localhost:5000",  # Local development with dev server
-    "http://localhost:5001"   # Local development with alt port
-]
 
 # Add middleware to log all requests and add CORS headers
 @app.middleware("http")
 async def add_cors_headers(request, call_next):
-    origin = request.headers.get("origin", "")
-    
-    # For OPTIONS requests, return a response immediately with CORS headers
-    if request.method == "OPTIONS":
-        response = JSONResponse(content={"detail": "CORS preflight handled"})
-        if origin and origin in origins:
-            response.headers["access-control-allow-origin"] = origin
-            response.headers["access-control-allow-credentials"] = "true"
-        else:
-            # For non-matching origins, return 403 to prevent cross-site access
-            response = JSONResponse(content={"detail": "Origin not allowed"}, status_code=403)
-            
-        response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["access-control-allow-headers"] = "*"
-        response.headers["access-control-expose-headers"] = "*"
-        response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
-        return response
-    
-    # Default response in case there's an error
+    start_time = time.time()
     try:
+        # Process the request
         response = await call_next(request)
         
-        # Add CORS headers if they're not already present
-        if "access-control-allow-origin" not in response.headers:
-            print(f"CORS headers not found for path: {request.url.path}. Adding them now.")
-            
-            # If the request has a specific origin header that's in our allowed list,
-            # use that exact origin in the response
-            if origin and origin in origins:
-                response.headers["access-control-allow-origin"] = origin
-                response.headers["access-control-allow-credentials"] = "true"
-            # Don't set CORS headers for non-allowed origins
-                
-            response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["access-control-allow-headers"] = "*"
-            response.headers["access-control-expose-headers"] = "*"
-            response.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
+        # Manually add CORS headers to ensure they're present
+        response.headers["Access-Control-Allow-Origin"] = "*"
         
+        # Calculate processing time
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
         return response
     except Exception as e:
-        print(f"Error in CORS middleware: {str(e)}")
-        # Create a new response if there was an error
-        resp = JSONResponse(content={"detail": "Internal server error"}, status_code=500)
-        
-        # Apply CORS headers to error response
-        if origin and origin in origins:
-            resp.headers["access-control-allow-origin"] = origin
-            resp.headers["access-control-allow-credentials"] = "true"
-        # Don't set CORS headers for non-allowed origins
-            
-        resp.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        resp.headers["access-control-allow-headers"] = "*"
-        resp.headers["access-control-expose-headers"] = "*"
-        resp.headers["access-control-max-age"] = "86400"  # Cache preflight for 24 hours
-        
-        return resp
-
-print("CORS middleware configured successfully")
+        # Handle errors
+        logger.error(f"Error processing request: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
 
 # Add WebSocket support
 try:
@@ -926,7 +836,7 @@ async def test_cors(request: Request):
     try:
         # Get the origin from the request
         origin = request.headers.get("origin", "No origin provided")
-        is_allowed = origin in origins
+        is_allowed = origin in ["https://front-production-f6e6.up.railway.app", "http://localhost:3000", "http://localhost:5000", "http://localhost:5001"]
         
         # Return detailed information about the request and CORS configuration
         response = JSONResponse(
@@ -935,9 +845,9 @@ async def test_cors(request: Request):
                 "timestamp": datetime.datetime.now().isoformat(),
                 "request_origin": origin,
                 "is_origin_allowed": is_allowed,
-                "allowed_origins": origins,
+                "allowed_origins": ["https://front-production-f6e6.up.railway.app", "http://localhost:3000", "http://localhost:5000", "http://localhost:5001"],
                 "cors_middleware": {
-                    "allow_credentials": True,
+                    "allow_credentials": False,
                     "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
                     "max_age": 86400
                 },
