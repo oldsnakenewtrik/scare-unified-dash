@@ -15,9 +15,9 @@ const getWebSocketUrl = () => {
   }
   
   // For local development
-  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
+  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
   const apiUrl = new URL(apiBaseUrl);
-  return `${protocol}//${apiUrl.hostname}:${apiUrl.port || '5001'}/ws`;
+  return `${protocol}//${apiUrl.hostname}:${apiUrl.port || '8000'}/ws`;
 };
 
 // Fallback to HTTP/HTTPS if WebSocket connection fails
@@ -31,7 +31,7 @@ const getFallbackUrl = () => {
   }
   
   // For local development
-  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
+  const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
   return `${apiBaseUrl}/api/ws-fallback`;
 };
 
