@@ -172,10 +172,29 @@ def get_database_url(test_connection=False):
     database_url = os.getenv("DATABASE_URL")
     database_public_url = os.getenv("DATABASE_PUBLIC_URL")
     
-    # When in Railway, prioritize the internal DATABASE_URL which should use postgres.railway.internal
-    if in_railway and database_url and "postgres.railway.internal" in database_url:
-        logger.info("Using internal Railway networking with postgres.railway.internal")
-    # For local development or cross-project access, use DATABASE_PUBLIC_URL if available
+    # When in Railway, always use internal networking
+    if in_railway:
+        # Check if DATABASE_URL exists and looks valid
+        if database_url:
+            # Extract host information for logging
+            try:
+                parsed = urlparse(database_url)
+                hostname = parsed.hostname
+                port = parsed.port or 5432
+                logger.info(f"Using internal Railway networking with host: {hostname}:{port}")
+                
+                # If the host doesn't contain railway.internal, log a warning but proceed
+                if hostname and "railway.internal" not in hostname:
+                    logger.warning(f"DATABASE_URL may not be using internal networking: {mask_password(database_url)}")
+            except Exception as e:
+                logger.error(f"Error parsing DATABASE_URL: {e}")
+        else:
+            logger.warning("No DATABASE_URL found for internal Railway networking")
+            # If DATABASE_PUBLIC_URL is available as fallback
+            if database_public_url:
+                logger.warning("Falling back to DATABASE_PUBLIC_URL although running in Railway")
+                database_url = database_public_url
+    # For local development, use DATABASE_PUBLIC_URL if available
     elif database_public_url:
         logger.info("Using DATABASE_PUBLIC_URL for external access")
         database_url = database_public_url
