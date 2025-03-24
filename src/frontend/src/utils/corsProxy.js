@@ -51,75 +51,134 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     });
     console.log('Direct API call succeeded');
     
-    // IMPROVED: Better handling of API responses for campaign endpoints
-    // This fixes the "TypeError: response.data.filter is not a function" and similar errors
-    if (endpoint.includes('campaigns-hierarchical') || 
-        endpoint.includes('campaign-mappings') || 
-        endpoint.includes('campaign-metrics') ||
-        endpoint.includes('unmapped-campaigns')) {
-      
-      console.log('Processing API response', endpoint);
-      
-      if (!response.data) {
-        // If response.data is null or undefined, use empty array
-        console.warn('Response data is null or undefined, using empty array');
-        response.data = [];
-      } else if (Array.isArray(response.data)) {
-        // Already an array, no conversion needed
-        console.log('Response data is already an array with', response.data.length, 'items');
-      } else if (typeof response.data === 'object') {
-        // It's an object, check if it has any array properties
-        console.log('Response data is an object, looking for array properties');
-        
-        // Special case handling for unmapped-campaigns endpoint which should always return an array
-        if (endpoint.includes('unmapped-campaigns')) {
-          // Force empty array if data is not already an array to prevent filter errors
-          console.log('Handling unmapped-campaigns endpoint specifically');
-          response.data = Array.isArray(response.data) ? response.data : [];
-          console.log('Returning', response.data.length, 'unmapped campaigns');
-        } else {
-          // First check for common array property names
-          const commonArrayProps = ['data', 'campaigns', 'items', 'results', 'records', 'unmapped_campaigns'];
-          let foundArrayProp = null;
-          
-          for (const prop of commonArrayProps) {
-            if (response.data[prop] && Array.isArray(response.data[prop])) {
-              foundArrayProp = prop;
-              break;
-            }
-          }
-          
-          // If common properties not found, check all properties
-          if (!foundArrayProp) {
-            const possibleArrayProps = Object.keys(response.data).filter(key => 
-              Array.isArray(response.data[key])
-            );
+    // Debug the actual response structure first
+    console.log('Raw API response structure:', JSON.stringify(response.data).substring(0, 200) + '...');
+    
+    // Enhanced API response handling for critical endpoints
+    if (endpoint.includes('/api/')) {
+      // Check specific endpoints that require special handling
+      if (endpoint.includes('campaigns-performance')) {
+        console.log('Processing campaigns-performance endpoint');
+        // This endpoint needs data formatted for forEach() operations in UnifiedDashboard.js
+        if (!Array.isArray(response.data)) {
+          // Try to find the performance data array in standard locations
+          if (response.data && typeof response.data === 'object') {
+            const possibleArrayProps = ['performance', 'campaigns', 'data', 'results', 'records'];
+            let foundArrayProp = null;
             
-            if (possibleArrayProps.length > 0) {
-              foundArrayProp = possibleArrayProps[0];
+            // Check common property names first
+            for (const prop of possibleArrayProps) {
+              if (response.data[prop] && Array.isArray(response.data[prop])) {
+                console.log(`Found performance data in '${prop}' property with ${response.data[prop].length} items`);
+                foundArrayProp = prop;
+                break;
+              }
             }
-          }
-          
-          if (foundArrayProp) {
-            console.log(`Found array property '${foundArrayProp}' with`, response.data[foundArrayProp].length, 'items');
-            response.data = response.data[foundArrayProp];
-          } else {
-            // If no array properties found, convert the object to an array with the object as the only item
-            // This handles the case where the API returns a single campaign object
-            if (Object.keys(response.data).length > 0) {
-              console.log('No array properties found, but object has data. Creating single-item array.');
-              response.data = [response.data];
+            
+            if (foundArrayProp) {
+              response.data = response.data[foundArrayProp];
             } else {
-              console.warn('Empty object response, using empty array');
+              // Create empty array as fallback - better to show no data than crash
+              console.warn('No performance data array found in response, using empty array');
               response.data = [];
             }
+          } else {
+            console.warn('Unexpected response format, using empty array');
+            response.data = [];
           }
         }
-      } else {
-        // Not an array or object, use empty array
-        console.warn('Response data is not an array or object, using empty array');
-        response.data = [];
+      } else if (endpoint.includes('unmapped-campaigns')) {
+        console.log('Processing unmapped-campaigns endpoint');
+        // This endpoint needs an array for .filter() in CampaignMapping.js
+        if (!Array.isArray(response.data)) {
+          if (response.data && typeof response.data === 'object') {
+            // Try to find the unmapped campaigns array
+            const possibleArrayProps = ['unmapped_campaigns', 'campaigns', 'data'];
+            let foundArray = false;
+            
+            for (const prop of possibleArrayProps) {
+              if (response.data[prop] && Array.isArray(response.data[prop])) {
+                console.log(`Found unmapped campaigns in '${prop}' property`);
+                response.data = response.data[prop];
+                foundArray = true;
+                break;
+              }
+            }
+            
+            if (!foundArray) {
+              console.warn('No unmapped campaigns array found, using empty array');
+              response.data = [];
+            }
+          } else {
+            console.warn('Unexpected unmapped-campaigns format, using empty array');
+            response.data = [];
+          }
+        }
+      } else if (endpoint.includes('campaigns-hierarchical')) {
+        console.log('Processing campaigns-hierarchical endpoint');
+        // This endpoint needs to return an array for the dashboard
+        if (!Array.isArray(response.data)) {
+          if (response.data && typeof response.data === 'object') {
+            // Check for common array properties
+            const possibleArrayProps = ['campaigns', 'hierarchical_campaigns', 'data', 'results'];
+            let foundArray = false;
+            
+            for (const prop of possibleArrayProps) {
+              if (response.data[prop] && Array.isArray(response.data[prop])) {
+                console.log(`Found hierarchical campaigns in '${prop}' property`);
+                response.data = response.data[prop];
+                foundArray = true;
+                break;
+              }
+            }
+            
+            // If we can't find an array property but there are keys, return empty array
+            // DO NOT convert non-array objects to single-item arrays as this breaks filtering
+            if (!foundArray) {
+              console.warn('No hierarchical campaigns array found, using empty array');
+              response.data = [];
+            }
+          } else {
+            console.warn('Unexpected hierarchical campaigns format, using empty array');
+            response.data = [];
+          }
+        }
+      } else if (endpoint.includes('campaign-mappings')) {
+        console.log('Processing campaign-mappings endpoint');
+        // This endpoint needs an array for rendering the mapping table
+        if (!Array.isArray(response.data)) {
+          if (response.data && typeof response.data === 'object') {
+            // Try to find the campaign mappings array
+            const possibleArrayProps = ['mappings', 'campaign_mappings', 'data', 'results'];
+            let foundArray = false;
+            
+            for (const prop of possibleArrayProps) {
+              if (response.data[prop] && Array.isArray(response.data[prop])) {
+                console.log(`Found campaign mappings in '${prop}' property`);
+                response.data = response.data[prop];
+                foundArray = true;
+                break;
+              }
+            }
+            
+            if (!foundArray) {
+              // Unlike other endpoints, campaign mappings might be a list of key-value pairs
+              // If no array property is found but we have keys, return an empty array
+              console.warn('No campaign mappings array found, using empty array');
+              response.data = [];
+            }
+          } else {
+            console.warn('Unexpected campaign mappings format, using empty array');
+            response.data = [];
+          }
+        }
       }
+      
+      // Always log the final processed data structure
+      console.log(`Final processed ${endpoint} data:`, 
+        Array.isArray(response.data) 
+          ? `Array with ${response.data.length} items` 
+          : typeof response.data);
     }
     
     return response;
