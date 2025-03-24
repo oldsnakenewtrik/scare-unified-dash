@@ -203,13 +203,9 @@ async def get_campaigns_hierarchical():
         except Exception as e:
             logger.error(f"Error forwarding to main app: {str(e)}")
     
-    # Fallback response
-    return {
-        "status": "partial",
-        "message": "Campaigns hierarchical endpoint is available but database connection may be limited",
-        "campaigns": [],
-        "timestamp": datetime.datetime.now().isoformat()
-    }
+    # Fallback response - FIXED: Return array directly instead of object with array inside
+    # This fixes the "TypeError: response.data.filter is not a function" error
+    return []  # Return empty array directly
 
 @app.get("/api/campaign-mappings")
 async def get_campaign_mappings():
@@ -226,13 +222,9 @@ async def get_campaign_mappings():
         except Exception as e:
             logger.error(f"Error forwarding to main app: {str(e)}")
     
-    # Fallback response
-    return {
-        "status": "partial",
-        "message": "Campaign mappings endpoint is available but database connection may be limited",
-        "mappings": [],
-        "timestamp": datetime.datetime.now().isoformat()
-    }
+    # Fallback response - FIXED: Return array directly instead of object with array inside
+    # This fixes the "TypeError: mappings.forEach is not a function" error
+    return []  # Return empty array directly
 
 # Add POST methods for the same endpoints
 @app.post("/api/campaign-metrics")

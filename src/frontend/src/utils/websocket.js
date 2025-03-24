@@ -10,7 +10,8 @@ const getWebSocketUrl = () => {
   // If we're in the production environment
   if (process.env.NODE_ENV === 'production') {
     // Use the backend service URL with the WebSocket protocol
-    // Important: Don't specify a port in production - let browser use default port (80/443)
+    // FIXED: Don't include port (8000) in production URLs for Railway
+    // Railway only allows connections through standard ports (80/443)
     return `${protocol}//scare-unified-dash-production.up.railway.app/ws`;
   }
   
