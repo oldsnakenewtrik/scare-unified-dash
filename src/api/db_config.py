@@ -170,83 +170,53 @@ def get_database_url(test_connection=False):
     Returns:
         str: Database URL
     """
-    # Always explicitly log where we're running
+    # Check if we're running in Railway environment
     in_railway = is_railway_environment()
-    if in_railway:
-        logger.info("Running in Railway environment - will prioritize internal networking")
-    else:
-        logger.info("Running in local environment")
+    logger.info(f"Running in Railway environment: {in_railway}")
     
     # Get the database URL from environment variables
     database_url = os.getenv("DATABASE_URL")
-    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
     
-    # For explicit logging
-    if database_url:
-        masked_db_url = mask_password(database_url)
-        logger.info(f"DATABASE_URL from environment: {masked_db_url}")
-        # Extract and log just the hostname for easier debugging
-        if '@' in database_url:
-            host_part = database_url.split('@')[1].split('/')[0]
-            logger.info(f"DATABASE_URL hostname component: {host_part}")
-    
-    if database_public_url:
-        masked_public_url = mask_password(database_public_url)
-        logger.info(f"DATABASE_PUBLIC_URL from environment: {masked_public_url}")
-    
-    # If running in Railway, ALWAYS try to use internal networking
-    if in_railway:
-        # First preference: DATABASE_URL with railway.internal
-        if database_url and "railway.internal" in database_url:
-            logger.info("Using internal Railway networking from DATABASE_URL")
-            return database_url
+    # In Railway, check if we can construct an internal URL
+    if in_railway and database_url:
+        masked_url = mask_password(database_url)
+        logger.info(f"Original DATABASE_URL: {masked_url}")
         
-        # Second preference: Construct from PGHOST etc. if they contain railway.internal
-        pghost = os.getenv("PGHOST")
-        if pghost and "railway.internal" in pghost:
-            logger.info(f"Constructing internal database URL using PGHOST={pghost}")
+        # Check if this is a proxy URL that will cause timeouts
+        if "proxy.rlwy.net" in database_url:
+            logger.warning("DATABASE_URL contains proxy.rlwy.net which will cause timeouts. Attempting to use internal URL.")
+            
+            # Try to get the PGHOST variable which should contain the internal hostname
+            pghost = os.getenv("PGHOST")
             pgport = os.getenv("PGPORT", "5432")
             pguser = os.getenv("PGUSER", "postgres")
             pgpassword = os.getenv("PGPASSWORD", "")
             pgdatabase = os.getenv("PGDATABASE", "railway")
             
-            internal_url = f"postgresql://{pguser}:{pgpassword}@{pghost}:{pgport}/{pgdatabase}?sslmode=require"
-            return internal_url
-            
-        # Third preference: Use DATABASE_URL even if it's not internal networking
-        # (but warn if it contains proxy.rlwy.net)
-        if database_url:
-            if "proxy.rlwy.net" in database_url:
-                logger.warning("WARNING: DATABASE_URL contains proxy.rlwy.net which may cause timeouts!")
-                logger.warning("Consider updating your Railway setup to use internal networking.")
-            else:
-                logger.info("Using DATABASE_URL (not internal networking)")
-            return database_url
-            
-        # Last resort: DATABASE_PUBLIC_URL (but with serious warnings)
-        if database_public_url:
-            if "proxy.rlwy.net" in database_public_url:
-                logger.error("CRITICAL WARNING: Using proxy.rlwy.net URL which will likely fail!")
-                logger.error("Update Railway template to properly use internal networking.")
-            logger.warning("Falling back to DATABASE_PUBLIC_URL because no internal URLs available")
-            return database_public_url
-    else:
-        # For local development, normal preferences apply
-        if database_url:
-            return database_url
-        elif database_public_url:
-            return database_public_url
+            if pghost:
+                logger.info(f"Using PGHOST: {pghost}")
+                internal_url = f"postgresql://{pguser}:{pgpassword}@{pghost}:{pgport}/{pgdatabase}?sslmode=require"
+                masked_internal = mask_password(internal_url)
+                logger.info(f"Constructed internal URL: {masked_internal}")
+                return internal_url
     
-    # If we're here, we couldn't find a database URL
-    logger.error("No database URL found in environment variables")
+    # If we're here, either we're not in Railway or we couldn't construct an internal URL
+    if not database_url:
+        # Fall back to default URL
+        if in_railway:
+            logger.error("No DATABASE_URL found in environment variables")
+            return None
+        else:
+            default_url = "postgresql://postgres:postgres@localhost:5432/postgres"
+            logger.warning(f"No DATABASE_URL found. Using default local URL: {default_url}")
+            return default_url
     
-    # Try to construct a fallback URL for local development
-    if not in_railway:
-        default_url = "postgresql://postgres:postgres@localhost:5432/postgres"
-        logger.warning(f"Falling back to default local URL: {default_url}")
-        return default_url
-        
-    return None
+    # Add SSL parameters if needed
+    database_url = add_ssl_params_if_needed(database_url)
+    masked_url = mask_password(database_url)
+    logger.info(f"Using database URL: {masked_url}")
+    
+    return database_url
 
 def create_engine_with_retry(database_url, **kwargs):
     """
