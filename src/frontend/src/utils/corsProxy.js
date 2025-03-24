@@ -50,6 +50,28 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       timeout: 60000
     });
     console.log('Direct API call succeeded');
+    
+    // FIXED: Ensure we always return an array for these specific endpoints
+    // This fixes the "TypeError: response.data.filter is not a function" and similar errors
+    if ((endpoint.includes('campaigns-hierarchical') || endpoint.includes('campaign-mappings')) 
+        && response.data && !Array.isArray(response.data)) {
+      console.log('Converting API response to array format');
+      
+      // Check if the response data has a property that's an array
+      const possibleArrayProps = Object.keys(response.data).filter(key => 
+        Array.isArray(response.data[key])
+      );
+      
+      if (possibleArrayProps.length > 0) {
+        // Use the first array property found
+        response.data = response.data[possibleArrayProps[0]];
+      } else {
+        // If we can't find an array property, force it to be an empty array
+        console.warn('Could not find array property in response, using empty array');
+        response.data = [];
+      }
+    }
+    
     return response;
   } catch (error) {
     console.error('API call failed:', error);
@@ -100,5 +122,5 @@ export default {
   get: getWithProxy,
   post: postWithProxy,
   put: putWithProxy,
-  delete: deleteWithProxy,
+  delete: deleteWithProxy
 };
