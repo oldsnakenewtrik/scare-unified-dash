@@ -23,9 +23,20 @@ import aiohttp
 from sqlalchemy import inspect
 
 # Import the database initialization module
-from .db_init import init_database, connect_with_retry
+try:
+    from .db_init import initialize_database, connect_with_retry, ensure_network_column_exists
+except ImportError:
+    # Try absolute import if relative import fails
+    from src.api.db_init import initialize_database, connect_with_retry, ensure_network_column_exists
+
 # Import the database monitoring module
-from .db_monitor import initialize_monitor, get_db_status, force_db_reconnect
+try:
+    from .db_monitor import initialize_monitor, get_db_status, force_db_reconnect
+    from .db_config import get_database_url
+except ImportError:
+    # Try absolute import if relative import fails
+    from src.api.db_monitor import initialize_monitor, get_db_status, force_db_reconnect
+    from src.api.db_config import get_database_url
 
 # Set up logging
 logging.basicConfig(
@@ -37,6 +48,46 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# CRITICAL FIX: Handle Railway's variable interpolation issue
+database_url = os.getenv("DATABASE_URL", "")
+logger.info(f"Raw DATABASE_URL: {database_url}")
+
+# Check if DATABASE_URL is actually a template variable that wasn't interpolated
+if not database_url or "${" in database_url:
+    logger.warning("DATABASE_URL is either empty or contains uninterpolated template variables")
+    
+    # First try to use DATABASE_PUBLIC_URL
+    public_url = os.getenv("DATABASE_PUBLIC_URL")
+    if public_url:
+        logger.info("Using DATABASE_PUBLIC_URL as fallback")
+        os.environ["DATABASE_URL"] = public_url
+    # Otherwise, if in Railway, construct internal URL
+    elif os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT"):
+        # Get credentials from environment variables
+        pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres"
+        pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
+        pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
+        
+        # Construct internal URL
+        logger.info("Constructing internal DATABASE_URL")
+        internal_url = f"postgresql://{pg_user}:{pg_password}@postgres.railway.internal:5432/{pg_database}?sslmode=require"
+        os.environ["DATABASE_URL"] = internal_url
+        logger.info("DATABASE_URL set to use internal networking")
+
+# Log all important environment variables for debugging (masked for security)
+safe_db_url = os.getenv("DATABASE_URL", "Not set")
+if safe_db_url and ":" in safe_db_url:
+    parts = safe_db_url.split(":")
+    for i, part in enumerate(parts):
+        if "@" in part:
+            # This part contains the password
+            password_parts = part.split("@")
+            parts[i] = "****@" + password_parts[1]
+    safe_db_url = ":".join(parts)
+
+logger.info(f"Final DATABASE_URL (masked): {safe_db_url}")
+logger.info(f"RAILWAY_PRIVATE_DOMAIN: {os.getenv('RAILWAY_PRIVATE_DOMAIN', 'Not set')}")
 
 # Set up the FastAPI application
 app = FastAPI(title="SCARE Unified Metrics API")
@@ -295,7 +346,7 @@ async def serve_frontend():
         )
 
 # Database connection
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://scare_user:scare_password@postgres:5432/scare_metrics")
+DATABASE_URL = get_database_url()
 
 # Global variable to track if DB monitor was initialized
 db_monitor_initialized = False
@@ -321,18 +372,41 @@ try:
     # Startup event to initialize database without blocking app startup
     @app.on_event("startup")
     async def startup_event():
-        """Initialize database on startup without blocking the app from starting"""
-        try:
-            # Run database initialization in a separate thread to avoid blocking
-            import threading
-            db_thread = threading.Thread(target=init_database)
-            db_thread.daemon = True  # Make thread a daemon so it doesn't block app shutdown
-            db_thread.start()
-            logger.info("Database initialization started in background thread")
-        except Exception as e:
-            logger.error(f"Error starting database initialization thread: {str(e)}")
-            # Continue app startup even if database initialization fails
-
+        """
+        Initialize database on startup without blocking the app from starting
+        """
+        logger.info("Application starting up...")
+        
+        # Run in a separate thread to avoid blocking the app startup
+        def init_db_async():
+            try:
+                # First, ensure the network column exists in the sm_fact_bing_ads table
+                # This is a critical fix that needs to run before other operations
+                logger.info("Checking for network column in sm_fact_bing_ads table...")
+                network_column_exists = ensure_network_column_exists()
+                if network_column_exists:
+                    logger.info("Network column check completed successfully")
+                else:
+                    logger.warning("Failed to ensure network column exists - application may encounter errors")
+                
+                # Then initialize the database normally
+                logger.info("Initializing database...")
+                engine, connection = initialize_database()
+                if engine and connection:
+                    logger.info("Database initialized successfully")
+                else:
+                    logger.error("Failed to initialize database")
+            except Exception as e:
+                logger.error(f"Error during database initialization: {e}")
+                logger.error(traceback.format_exc())
+        
+        # Start the initialization in a separate thread
+        import threading
+        db_thread = threading.Thread(target=init_db_async)
+        db_thread.daemon = True  # Allow the thread to exit when the main thread exits
+        db_thread.start()
+        logger.info("Database initialization started in background thread")
+    
     # Add a global on_startup handler to verify DB connection when app starts
     @app.on_event("startup")
     def startup_db_client():
@@ -366,7 +440,7 @@ try:
     
     # Initialize database at startup
     try:
-        init_database(engine)
+        initialize_database()
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
