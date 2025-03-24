@@ -1,8 +1,16 @@
-[build]
-builder = "NIXPACKS"
+# Service-specific configurations for Railway
 
-[deploy]
-startCommand = "python -m src.api.health_app"
-healthcheckPath = "/api/health"
-healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
+[[services]]
+  name = "back"
+  build = { builder = "NIXPACKS" }
+  deploy = {
+    startCommand = "uvicorn src.api.main:app --host 0.0.0.0 --port $PORT",
+    healthcheckPath = "/api/health",
+    healthcheckTimeout = 300,
+    restartPolicyType = "ON_FAILURE",
+    restartPolicyMaxRetries = 10
+  }
+
+[[services]]
+  name = "postgres"
+  source = { type = "image", image = "ghcr.io/railwayapp-templates/postgres-ssl:16" }
