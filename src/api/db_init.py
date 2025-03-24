@@ -53,6 +53,14 @@ def connect_with_retry(max_retries=5, delay=5):
         logger.error("No database URL available")
         return None
     
+    # Check if this is a proxy URL which will likely timeout
+    if "proxy.rlwy.net" in database_url:
+        logger.warning("WARNING: Using a Railway proxy URL for database connection!")
+        logger.warning("This may cause timeouts. Ensure internal networking is configured correctly.")
+        # Don't fail here - let it try, but warn loudly
+    
+    logger.info(f"Initial database URL protocol and host: {database_url.split('@')[1].split('/')[0] if '@' in database_url else database_url.split('/')[2]}")
+    
     # Try to connect with retry
     for attempt in range(1, max_retries + 1):
         try:
@@ -80,14 +88,19 @@ def connect_with_retry(max_retries=5, delay=5):
         except Exception as e:
             logger.error(f"Error connecting to database (attempt {attempt}): {e}")
             
-            # For errors with the Railway internal connection, try fallback to public URL
-            # but ONLY if we're NOT already using a public URL
-            if attempt == max_retries // 2 and "postgres.railway.internal" in database_url:
-                public_url = os.getenv("DATABASE_PUBLIC_URL")
-                if public_url and "up.railway.app" in public_url:
-                    logger.warning("Internal connection failed, trying DATABASE_PUBLIC_URL as fallback")
-                    database_url = public_url
-                    # Reset attempt counter to give the public URL a fair chance
+            # If we're in Railway and not using internal networking, try to construct an internal URL
+            if "railway.app" in os.environ.get("RAILWAY_PUBLIC_DOMAIN", "") and "railway.internal" not in database_url:
+                pghost = os.environ.get("PGHOST")
+                pgport = os.environ.get("PGPORT", "5432")
+                pguser = os.environ.get("PGUSER", "postgres")
+                pgpassword = os.environ.get("PGPASSWORD", "")
+                pgdatabase = os.environ.get("PGDATABASE", "railway")
+                
+                if pghost and "railway.internal" in pghost:
+                    logger.warning(f"Attempting to use Railway internal networking with host {pghost}")
+                    internal_url = f"postgresql://{pguser}:{pgpassword}@{pghost}:{pgport}/{pgdatabase}?sslmode=require"
+                    database_url = internal_url
+                    # Reset attempt counter to try the internal URL
                     attempt = 0
                     continue
             
