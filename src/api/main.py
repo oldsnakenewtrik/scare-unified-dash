@@ -59,9 +59,38 @@ if database_public_url:
     logger.info(f"DATABASE_URL set to: {masked_url}")
 else:
     logger.warning("DATABASE_PUBLIC_URL not available - trying to construct connection URL manually")
-    # Get credentials from environment variables
+    
+    # CRITICAL: Get password from Railway environment
+    # Look for all possible password environment variables
     pg_user = os.getenv("POSTGRES_USER") or os.getenv("PGUSER") or "postgres" 
-    pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD", "")
+    pg_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("PGPASSWORD")
+    
+    # If password is still not found, try to extract from other variables
+    if not pg_password:
+        logger.warning("No explicit database password found. Trying to extract from Railway service variables.")
+        # Try to extract from RAILWAY_POSTGRES_URL if available
+        postgres_url = os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("PG_DATABASE_URL")
+        if postgres_url and '@' in postgres_url:
+            try:
+                # Extract password from URL format postgresql://user:password@host:port/db
+                auth_part = postgres_url.split('@')[0].split('://')[1]
+                pg_password = auth_part.split(':')[1]
+                logger.info("Successfully extracted password from RAILWAY_POSTGRES_URL")
+            except Exception as e:
+                logger.error(f"Failed to extract password from URL: {e}")
+    
+    # If still no password, check if there's a default Railway password
+    if not pg_password:
+        railway_private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN")
+        if railway_private_domain:
+            logger.info("Using Railway default password mechanism")
+            pg_password = "password"  # Railway sometimes uses default passwords
+    
+    # Final fallback 
+    if not pg_password:
+        logger.error("ERROR: No database password found in any environment variable!")
+        pg_password = ""  # Empty as a last resort
+    
     pg_database = os.getenv("POSTGRES_DB") or os.getenv("PGDATABASE") or "railway"
     
     # Construct connection URL
