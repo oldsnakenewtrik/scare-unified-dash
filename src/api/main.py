@@ -137,20 +137,44 @@ async def add_cors_headers(request, call_next):
         # Process the request
         response = await call_next(request)
         
-        # Manually add CORS headers to ensure they're present
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        # Only add CORS headers if we don't already have them
+        if "Access-Control-Allow-Origin" not in response.headers:
+            response.headers["Access-Control-Allow-Origin"] = "*"
         
         # Calculate processing time
         process_time = time.time() - start_time
         response.headers["X-Process-Time"] = str(process_time)
+        
+        # Log the request path and status code
+        path = request.url.path
+        logger.info(f"Request: {request.method} {path} - Status: {response.status_code}")
+        
         return response
     except Exception as e:
-        # Handle errors
-        logger.error(f"Error processing request: {e}")
+        # Log the error
+        path = request.url.path
+        logger.error(f"Error processing request to {path}: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return a proper error response
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error"},
+            content={"error": "Internal server error", "detail": str(e)},
         )
+
+# Add a new middleware to properly handle 404 errors
+@app.middleware("http")
+async def handle_404(request, call_next):
+    response = await call_next(request)
+    
+    # If the response status code is 404, make sure it's returned as a proper 404
+    if response.status_code == 404:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Not Found", "path": request.url.path, "status_code": 404}
+        )
+    
+    return response
 
 # Add WebSocket support
 try:
@@ -1332,6 +1356,24 @@ async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=D
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error archiving campaign mapping: {str(e)}"
         )
+
+# Add a test endpoint that doesn't require database access
+@app.get("/api/test")
+async def test_endpoint():
+    """
+    Simple test endpoint that doesn't require database access.
+    Use this to verify the API is responding properly.
+    """
+    return {
+        "status": "ok",
+        "message": "API is working correctly",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "environment": {
+            "cors_origins": cors_origins,
+            "api_host": os.environ.get("API_HOST", "Not set"),
+            "api_port": os.environ.get("API_PORT", "Not set"),
+        }
+    }
 
 # Create a function to handle database errors consistently
 def handle_db_error(error: Exception, operation: str):
