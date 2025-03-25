@@ -39,93 +39,113 @@ const getApiBaseUrl = () => {
 const API_BASE_URL = getApiBaseUrl();
 console.log('Final API base URL:', API_BASE_URL);
 
+const DEFAULT_TIMEOUT = 10000;
+
 /**
- * Make a direct API request
- * @param {string} endpoint API endpoint (e.g., '/api/campaigns')
- * @param {string} method HTTP method (GET, POST, PUT, DELETE)
- * @param {Object} params URL parameters for GET requests
- * @param {Object} data Request body for POST/PUT requests
- * @returns {Promise} Axios promise with the response data
+ * Makes an API call through the CORS proxy
+ * @param {string} endpoint - The API endpoint to call
+ * @param {Object} params - Query parameters for the API call
+ * @param {Object} options - Additional options for the API call
+ * @returns {Promise<Object>} - Response from the API
  */
-export const fetchThroughProxy = async (endpoint, method = 'get', params = {}, data = {}) => {
-  const url = `${API_BASE_URL}${endpoint}`;
+const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
+  // Build the API URL
+  const baseUrl = getApiBaseUrl();
+  const fullUrl = `${baseUrl}${endpoint}`;
+  
+  // Log the API call
+  console.log(`Making API call to ${fullUrl}`, params);
+  
+  // Set up request options
+  const axiosConfig = {
+    params,
+    timeout: options.timeout || DEFAULT_TIMEOUT,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  };
   
   try {
-    console.log(`Making API call to ${url}`, {method, params});
+    const response = await axios.get(fullUrl, axiosConfig);
     
-    const response = await axios({
-      method,
-      url: url,
-      params: params,
-      data: data,
-      withCredentials: false, // Disabled for troubleshooting CORS
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-    
-    // Check if the response contains an error object despite 200 status
-    if (response.data && response.data.error && response.data.status_code === 404) {
-      console.error(`API endpoint returned 404 inside 200 response: ${endpoint}`);
+    // Handle the case where the API returns a 404 inside a 200 response
+    // This is not ideal but sometimes happens with certain backend implementations
+    if (response?.data?.status === 404) {
+      console.log(`API endpoint returned 404 inside 200 response: ${endpoint}`);
       
-      // Return empty arrays for these endpoints instead of throwing errors
-      if (endpoint.includes('campaign-mappings') || 
-          endpoint.includes('campaign-metrics') || 
-          endpoint.includes('campaigns-hierarchical') || 
-          endpoint.includes('unmapped-campaigns')) {
+      // Log detailed information about the response to help debugging
+      console.error(`Detailed error for ${endpoint}:`, {
+        statusCode: response.status,
+        internalStatus: response?.data?.status,
+        message: response?.data?.detail || 'No detail provided',
+        endpoint
+      });
+      
+      // For critical endpoints that the UI depends on, return an empty array to prevent crashes
+      const criticalEndpoints = [
+        '/api/campaign-metrics',
+        '/api/campaigns-hierarchical',
+        '/api/campaign-mappings',
+        '/api/unmapped-campaigns'
+      ];
+      
+      if (criticalEndpoints.includes(endpoint)) {
         console.log(`Returning empty array for ${endpoint} instead of error`);
-        return { data: [] };
+        return { 
+          data: [],
+          _error: {
+            type: 'INTERNAL_404',
+            message: `Endpoint ${endpoint} returned a 404 inside a 200 response`,
+            timestamp: new Date().toISOString()
+          }
+        };
       }
       
-      // For other endpoints, throw a more helpful error
-      throw new Error(`API endpoint not available: ${endpoint}`);
+      // For non-critical endpoints, throw the error so it can be handled by the caller
+      throw new Error(`API endpoint ${endpoint} returned 404 status inside 200 response`);
     }
     
-    // Handle the case where response.data might not be an array for endpoints that should return arrays
-    if ((endpoint.includes('campaign-mappings') || 
-         endpoint.includes('campaign-metrics') || 
-         endpoint.includes('campaigns-hierarchical') || 
-         endpoint.includes('unmapped-campaigns')) && 
-        (!response.data || !Array.isArray(response.data))) {
-      console.warn(`API endpoint ${endpoint} returned non-array response:`, response.data);
-      return { data: [] };
-    }
-    
-    // Return response data in a consistent format
-    return { data: Array.isArray(response.data) ? response.data : [] };
+    // Return the response data
+    return response;
   } catch (error) {
-    // Handle specific error cases with custom behavior
+    // Log detailed error information
+    console.error(`Error calling API endpoint ${endpoint}:`, error);
+    
+    // Create a structured error object with detailed information
+    const errorInfo = {
+      type: error.response ? `HTTP_${error.response.status}` : 'NETWORK_ERROR',
+      message: error.message || 'Unknown error',
+      endpoint,
+      timestamp: new Date().toISOString(),
+    };
+    
+    // Add response details if available
     if (error.response) {
-      // Server responded with a status code outside of 2xx range
-      console.error(`API call to ${url} failed with status ${error.response.status}:`, error.response.data);
-      
-      // Return empty arrays for critical endpoints instead of throwing errors
-      if (endpoint.includes('campaign-mappings') || 
-          endpoint.includes('campaign-metrics') || 
-          endpoint.includes('campaigns-hierarchical') || 
-          endpoint.includes('unmapped-campaigns')) {
-        console.log(`Returning empty array for ${endpoint} after error`);
-        return { data: [] };
-      }
-    } else if (error.request) {
-      // Request was made but no response received
-      console.error(`API call to ${url} failed: No response received`, error.request);
-    } else {
-      // Something else happened while setting up the request
-      console.error(`API call to ${url} failed: ${error.message}`);
+      errorInfo.statusCode = error.response.status;
+      errorInfo.statusText = error.response.statusText;
+      errorInfo.data = error.response.data;
     }
     
-    // For certain endpoints, don't throw but return an empty array
-    if (endpoint.includes('campaign-mappings') || 
-        endpoint.includes('campaign-metrics') || 
-        endpoint.includes('campaigns-hierarchical') || 
-        endpoint.includes('unmapped-campaigns')) {
-      console.log(`Returning empty array for ${endpoint} after error`);
-      return { data: [] };
+    // Log the structured error
+    console.error('Structured API error:', errorInfo);
+    
+    // For critical endpoints, return an empty array with error information
+    const criticalEndpoints = [
+      '/api/campaign-metrics',
+      '/api/campaigns-hierarchical',
+      '/api/campaign-mappings',
+      '/api/unmapped-campaigns'
+    ];
+    
+    if (criticalEndpoints.includes(endpoint)) {
+      return { 
+        data: [],
+        _error: errorInfo
+      };
     }
     
-    // For all other endpoints or errors, throw the error to be handled by caller
+    // Re-throw the error for non-critical endpoints
     throw error;
   }
 };
@@ -137,7 +157,7 @@ export const fetchThroughProxy = async (endpoint, method = 'get', params = {}, d
  * @returns {Promise} Axios promise with the response data
  */
 export const getWithProxy = (endpoint, params = {}) => {
-  return fetchThroughProxy(endpoint, 'get', params);
+  return fetchThroughProxy(endpoint, params);
 };
 
 /**
@@ -147,7 +167,7 @@ export const getWithProxy = (endpoint, params = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const postWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy(endpoint, 'post', {}, data);
+  return fetchThroughProxy(endpoint, {}, { method: 'post', data });
 };
 
 /**
@@ -157,7 +177,7 @@ export const postWithProxy = (endpoint, data = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const putWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy(endpoint, 'put', {}, data);
+  return fetchThroughProxy(endpoint, {}, { method: 'put', data });
 };
 
 /**
@@ -166,7 +186,7 @@ export const putWithProxy = (endpoint, data = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const deleteWithProxy = (endpoint) => {
-  return fetchThroughProxy(endpoint, 'delete');
+  return fetchThroughProxy(endpoint, {}, { method: 'delete' });
 };
 
 export default {

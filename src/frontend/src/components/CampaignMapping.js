@@ -123,12 +123,24 @@ function CampaignMapping() {
         sourceSystem ? { source_system: sourceSystem } : {}
       );
       
+      // Check if there was an error in the response
+      if (mappedResponse._error) {
+        console.error('Error fetching campaign mappings:', mappedResponse._error);
+        // Continue processing but log the error
+      }
+      
       // Ensure we have a valid response data array - consistent access pattern
       const mappedData = mappedResponse?.data || [];
       
       console.log(`Fetching unmapped campaigns...`);
       // Fetch all unmapped campaigns
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
+      
+      // Check if there was an error in the response
+      if (unmappedResponse._error) {
+        console.error('Error fetching unmapped campaigns:', unmappedResponse._error);
+        // Continue processing but log the error
+      }
       
       // Ensure we have a valid response data array - consistent access pattern
       const allUnmapped = unmappedResponse?.data || [];
@@ -140,40 +152,68 @@ function CampaignMapping() {
       
       console.log(`Received ${mappedData.length} mapped campaigns and ${filteredUnmapped.length} unmapped campaigns`);
       
+      // Store the data in state
       setMappedCampaigns(mappedData);
       setUnmappedCampaigns(filteredUnmapped);
+      
+      // Determine if we got real data or just fallback empty arrays
+      if (mappedData.length === 0 && filteredUnmapped.length === 0) {
+        if (mappedResponse._error || unmappedResponse._error) {
+          const errorDetail = mappedResponse._error || unmappedResponse._error;
+          console.warn('API returned empty data sets due to errors:', errorDetail);
+          
+          // Show a more detailed error message to help diagnose backend issues
+          const errorType = errorDetail.type || 'UNKNOWN';
+          const errorMsg = errorDetail.message || 'Unknown error';
+          
+          if (errorType === 'INTERNAL_404') {
+            setError('Backend API endpoints are not accessible. This may be due to database migration issues.');
+          } else if (errorType.startsWith('HTTP_5')) {
+            setError('Backend server error. Please check server logs for details.');
+          } else {
+            setError(`API Error (${errorType}): ${errorMsg}`);
+          }
+        } else {
+          console.log('No campaigns found - this could be normal if there is no data');
+          // No error to display - this could be normal if there is no data
+        }
+      }
     } catch (err) {
-      console.error('Error fetching campaign mapping data:', err);
+      console.error('Error in fetchData:', err);
+      setError(`Failed to fetch campaign data: ${err.message}`);
       
       // Set empty arrays as fallback
       setMappedCampaigns([]);
       setUnmappedCampaigns([]);
-      
-      // Provide more detailed error information
-      let errorMessage = 'Failed to fetch campaign data. This could be due to database migration issues. Please try again later.';
-      
-      if (err.code === 'ECONNABORTED') {
-        errorMessage += ' The request timed out. The server might be under heavy load or the dataset might be too large.';
-      } else if (err.response) {
-        // The server responded with a status code outside the 2xx range
-        errorMessage += ` Server responded with status: ${err.response.status}.`;
-        if (err.response.data && err.response.data.detail) {
-          errorMessage += ' ' + err.response.data.detail;
-        }
-      } else if (err.request) {
-        // The request was made but no response was received
-        errorMessage += ' No response received from server. Please check your network connection or try again later.';
-      }
-      
-      setError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch unmapped campaigns for the new tab
+  const fetchUnmappedForTab = async (newTabIndex) => {
+    try {
+      // Fetch all unmapped campaigns
+      const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
+      
+      // Filter unmapped campaigns by source if needed
+      const allUnmapped = unmappedResponse?.data || [];
+      const filteredUnmapped = newTabIndex !== 0 
+        ? allUnmapped.filter(c => c && c.source_system === DATA_SOURCES[newTabIndex - 1])
+        : allUnmapped;
+      
+      setUnmappedCampaigns(filteredUnmapped);
+    } catch (err) {
+      console.error('Error fetching unmapped campaigns:', err);
+      // Set fallback empty array
+      setUnmappedCampaigns([]);
+    }
+  };
+
   // Handle tab change
-  const handleTabChange = (event, newValue) => {
+  const handleTabChange = async (event, newValue) => {
     setActiveTab(newValue);
+    await fetchUnmappedForTab(newValue);
   };
 
   // Open dialog for creating a new mapping
@@ -276,19 +316,25 @@ function CampaignMapping() {
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
       // Filter unmapped campaigns by source if needed
-      const allUnmapped = unmappedResponse.data.results;
+      const allUnmapped = unmappedResponse?.data || [];
       const filteredUnmapped = activeTab !== 0 
-        ? allUnmapped.filter(c => c.source_system === DATA_SOURCES[activeTab - 1])
+        ? allUnmapped.filter(c => c && c.source_system === DATA_SOURCES[activeTab - 1])
         : allUnmapped;
       
       setUnmappedCampaigns(filteredUnmapped);
     } catch (err) {
       console.error('Error fetching unmapped campaigns:', err);
-      setError('Failed to fetch unmapped campaigns. Please try again later.');
+      // Set fallback empty array
+      setUnmappedCampaigns([]);
+      setError('Failed to refresh unmapped campaigns. Please try again later.');
     } finally {
       setLoading(false);
     }
   };
+
+  // Ensure mappedCampaigns and unmappedCampaigns are always arrays
+  const safeMappedCampaigns = Array.isArray(mappedCampaigns) ? mappedCampaigns : [];
+  const safeUnmappedCampaigns = Array.isArray(unmappedCampaigns) ? unmappedCampaigns : [];
 
   return (
     <Box sx={{ width: '100%', mt: 3 }}>
@@ -322,7 +368,7 @@ function CampaignMapping() {
               <Box sx={{ mb: 4 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="h6">
-                    Unmapped Campaigns
+                    Unmapped Campaigns ({safeUnmappedCampaigns.length})
                   </Typography>
                   <IconButton 
                     color="primary" 
@@ -333,9 +379,9 @@ function CampaignMapping() {
                   </IconButton>
                 </Box>
                 
-                {unmappedCampaigns.length === 0 ? (
+                {safeUnmappedCampaigns.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">
-                    No unmapped campaigns found. All campaigns have been assigned pretty names.
+                    No unmapped campaigns found. Either all campaigns are mapped or there's no data available.
                   </Typography>
                 ) : (
                   <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
@@ -350,10 +396,10 @@ function CampaignMapping() {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {unmappedCampaigns.map((campaign) => (
-                          <TableRow key={`${campaign.source_system}-${campaign.external_campaign_id}`}>
-                            <TableCell>{campaign.campaign_name}</TableCell>
-                            <TableCell>{campaign.source_system}</TableCell>
+                        {safeUnmappedCampaigns.map((campaign) => (
+                          <TableRow key={`${campaign.source_system || 'unknown'}-${campaign.external_campaign_id || 'unknown'}-${campaign.campaign_name || 'unknown'}`}>
+                            <TableCell>{campaign.campaign_name || 'Unknown'}</TableCell>
+                            <TableCell>{campaign.source_system || 'Unknown'}</TableCell>
                             <TableCell>{campaign.network || 'Unknown'}</TableCell>
                             <TableCell>{campaign.external_campaign_id}</TableCell>
                             <TableCell align="right">
@@ -381,10 +427,10 @@ function CampaignMapping() {
               {/* Mapped Campaigns Section */}
               <Box>
                 <Typography variant="h6" gutterBottom>
-                  Mapped Campaigns
+                  Mapped Campaigns ({safeMappedCampaigns.length})
                 </Typography>
                 
-                {mappedCampaigns.length === 0 ? (
+                {safeMappedCampaigns.length === 0 ? (
                   <Typography variant="body2" color="text.secondary">
                     No campaign mappings found. Map campaigns from the unmapped list above.
                   </Typography>
@@ -405,22 +451,22 @@ function CampaignMapping() {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {mappedCampaigns.map((mapping) => (
-                          <TableRow key={mapping.id}>
-                            <TableCell>{mapping.original_campaign_name}</TableCell>
-                            <TableCell>{mapping.pretty_campaign_name}</TableCell>
-                            <TableCell>{mapping.campaign_category || 'Uncategorized'}</TableCell>
-                            <TableCell>{mapping.campaign_type || 'Uncategorized'}</TableCell>
-                            <TableCell>{mapping.source_system}</TableCell>
-                            <TableCell>{mapping.pretty_source || mapping.source_system}</TableCell>
-                            <TableCell>{mapping.network || 'Unknown'}</TableCell>
-                            <TableCell>{mapping.pretty_network || 'Unknown'}</TableCell>
+                        {safeMappedCampaigns.map((mapping) => (
+                          <TableRow key={mapping?.id || `mapping-${Math.random()}`}>
+                            <TableCell>{mapping?.original_campaign_name || 'Unknown'}</TableCell>
+                            <TableCell>{mapping?.pretty_campaign_name || 'Unknown'}</TableCell>
+                            <TableCell>{mapping?.campaign_category || 'Uncategorized'}</TableCell>
+                            <TableCell>{mapping?.campaign_type || 'Uncategorized'}</TableCell>
+                            <TableCell>{mapping?.source_system || 'Unknown'}</TableCell>
+                            <TableCell>{mapping?.pretty_source || mapping?.source_system || 'Unknown'}</TableCell>
+                            <TableCell>{mapping?.network || 'Unknown'}</TableCell>
+                            <TableCell>{mapping?.pretty_network || 'Unknown'}</TableCell>
                             <TableCell align="right">
                               <Button 
                                 variant="outlined" 
                                 color="secondary" 
                                 size="small"
-                                onClick={() => handleDeleteMapping(mapping.id)}
+                                onClick={() => handleDeleteMapping(mapping?.id)}
                               >
                                 Delete
                               </Button>
