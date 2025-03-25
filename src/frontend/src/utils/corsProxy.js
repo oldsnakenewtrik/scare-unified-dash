@@ -25,9 +25,11 @@ const getApiBaseUrl = () => {
   if (window.location.hostname.includes('railway.app') || 
       window.location.hostname.includes('up.railway.app')) {
     
-    // Point directly to the BACK service URL from Railway dashboard
-    const backendUrl = 'https://scare-unified-dash-production.up.railway.app';
-    console.log('Detected Railway environment, using BACK service URL:', backendUrl);
+    // Update to use the backend service URL with explicit API path
+    // This assumes the API is mounted at a subpath on the same service
+    const productionUrl = window.location.origin;
+    const backendUrl = `${productionUrl}/api`;
+    console.log('Detected Railway environment, using backend URL:', backendUrl);
     return backendUrl;
   }
   
