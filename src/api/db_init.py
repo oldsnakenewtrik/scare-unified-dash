@@ -274,8 +274,27 @@ def create_migrations_table(connection):
             logger.info("Migrations table created successfully")
             return True
         else:
-            logger.info("Migrations table already exists")
-            return False
+            logger.info("Migrations table exists, checking columns")
+            
+            # Check if name column exists (what the code expects)
+            has_name_column = check_column_exists(connection, "migrations", "name")
+            has_migration_name_column = check_column_exists(connection, "migrations", "migration_name")
+            
+            if has_name_column:
+                logger.info("Migrations table has the correct schema with 'name' column")
+                return True
+            elif has_migration_name_column:
+                # Column exists with wrong name, rename it
+                logger.info("Migrations table has 'migration_name' column, renaming to 'name'")
+                connection.execute(text("ALTER TABLE migrations RENAME COLUMN migration_name TO name"))
+                logger.info("Renamed 'migration_name' column to 'name'")
+                return True
+            else:
+                # Neither column exists, add the name column
+                logger.info("Migrations table is missing the name column, adding it")
+                add_column_if_not_exists(connection, "migrations", "name", "VARCHAR(255) NOT NULL DEFAULT 'migration'")
+                logger.info("Added 'name' column to migrations table")
+                return True
     except Exception as e:
         logger.error(f"Error creating migrations table: {str(e)}")
         return False
@@ -287,8 +306,8 @@ def check_migration_applied(connection, migration_name):
     try:
         if check_table_exists(connection, "migrations"):
             result = connection.execute(
-                text("SELECT COUNT(*) FROM migrations WHERE name = :name"),
-                {"name": migration_name}
+                text("SELECT COUNT(*) FROM migrations WHERE name = :migration_name"),
+                {"migration_name": migration_name}
             ).fetchone()
             return result[0] > 0
         else:
@@ -303,8 +322,8 @@ def record_migration(connection, migration_name):
     """
     try:
         connection.execute(
-            text("INSERT INTO migrations (name) VALUES (:name)"),
-            {"name": migration_name}
+            text("INSERT INTO migrations (name) VALUES (:migration_name)"),
+            {"migration_name": migration_name}
         )
         logger.info(f"Recorded migration {migration_name}")
         return True
