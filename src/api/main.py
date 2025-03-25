@@ -290,211 +290,6 @@ except ImportError as e:
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
 
-# Health check endpoint for verifying server status
-@app.get("/health")
-def health_check(db=Depends(get_db)):
-    """
-    Health check endpoint that verifies the status of:
-    - Database connection
-    - Required tables
-    - Campaign mappings
-    - Data in fact tables
-    """
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "components": {}
-    }
-    
-    # Check database connection
-    try:
-        db.execute(text("SELECT 1")).fetchone()
-        health_status["components"]["database"] = {
-            "status": "healthy",
-            "message": "Database connection successful"
-        }
-    except Exception as e:
-        health_status["status"] = "unhealthy"
-        health_status["components"]["database"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-        return health_status
-    
-    # Check required tables
-    required_tables = [
-        "sm_campaign_name_mapping",
-        "sm_fact_google_ads",
-        "sm_fact_bing_ads",
-        "sm_fact_matomo",
-        "sm_fact_redtrack"
-    ]
-    
-    try:
-        # Query to check which tables exist
-        table_query = """
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name IN ('sm_campaign_name_mapping', 'sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack')
-        """
-        existing_tables = [row[0] for row in db.execute(text(table_query)).fetchall()]
-        
-        missing_tables = [table for table in required_tables if table not in existing_tables]
-        
-        if missing_tables:
-            health_status["status"] = "degraded"
-            health_status["components"]["tables"] = {
-                "status": "degraded",
-                "error": f"Missing tables: {', '.join(missing_tables)}",
-                "existing_tables": existing_tables,
-                "missing_tables": missing_tables
-            }
-        else:
-            health_status["components"]["tables"] = {
-                "status": "healthy",
-                "message": "All required tables exist",
-                "tables": existing_tables
-            }
-    except Exception as e:
-        health_status["status"] = "degraded"
-        health_status["components"]["tables"] = {
-            "status": "unhealthy",
-            "error": f"Error checking tables: {str(e)}"
-        }
-    
-    # Check data in fact tables
-    fact_tables = [
-        "sm_fact_google_ads",
-        "sm_fact_bing_ads",
-        "sm_fact_matomo",
-        "sm_fact_redtrack"
-    ]
-    
-    try:
-        fact_table_counts = {}
-        empty_tables = []
-        
-        for table in fact_tables:
-            if table in existing_tables:
-                count_query = f"SELECT COUNT(*) FROM public.{table}"
-                count = db.execute(text(count_query)).scalar() or 0
-                fact_table_counts[table] = count
-                
-                if count == 0:
-                    empty_tables.append(table)
-        
-        if empty_tables:
-            health_status["components"]["fact_data"] = {
-                "status": "degraded",
-                "error": f"Empty fact tables: {', '.join(empty_tables)}",
-                "counts": fact_table_counts
-            }
-            
-            if health_status["status"] == "healthy":
-                health_status["status"] = "degraded"
-        else:
-            health_status["components"]["fact_data"] = {
-                "status": "healthy",
-                "message": "All fact tables have data",
-                "counts": fact_table_counts
-            }
-    except Exception as e:
-        health_status["status"] = "degraded"
-        health_status["components"]["fact_data"] = {
-            "status": "unhealthy",
-            "error": f"Error checking fact data: {str(e)}"
-        }
-    
-    # Check campaign mappings
-    try:
-        if "sm_campaign_name_mapping" in existing_tables:
-            # Get count of mappings
-            mapping_count = db.execute(text("SELECT COUNT(*) FROM public.sm_campaign_name_mapping")).scalar() or 0
-            
-            # Get count of unmapped campaigns
-            unmapped_query = """
-                WITH all_campaigns AS (
-                    SELECT DISTINCT 'Google Ads' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_google_ads WHERE campaign_id IS NOT NULL
-                    UNION ALL
-                    SELECT DISTINCT 'Bing Ads' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_bing_ads WHERE campaign_id IS NOT NULL
-                    UNION ALL
-                    SELECT DISTINCT 'Matomo' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_matomo WHERE campaign_id IS NOT NULL
-                    UNION ALL
-                    SELECT DISTINCT 'RedTrack' as source, CAST(campaign_id AS VARCHAR) as id FROM public.sm_fact_redtrack WHERE campaign_id IS NOT NULL
-                )
-                SELECT COUNT(*) FROM all_campaigns ac
-                LEFT JOIN public.sm_campaign_name_mapping m ON ac.source = m.source_system AND ac.id = m.external_campaign_id
-                WHERE m.id IS NULL
-            """
-            
-            try:
-                unmapped_count = db.execute(text(unmapped_query)).scalar() or 0
-                
-                # Get counts by source
-                source_counts = {}
-                for source in ["Google Ads", "Bing Ads", "Matomo", "RedTrack"]:
-                    source_query = f"""
-                        SELECT COUNT(*) FROM public.sm_campaign_name_mapping 
-                        WHERE source_system = '{source}'
-                    """
-                    source_count = db.execute(text(source_query)).scalar() or 0
-                    source_counts[source] = source_count
-                
-                if mapping_count == 0:
-                    health_status["components"]["campaign_mappings"] = {
-                        "status": "degraded",
-                        "error": "No campaign mappings found",
-                        "unmapped_count": unmapped_count,
-                        "by_source": source_counts
-                    }
-                    
-                    if health_status["status"] == "healthy":
-                        health_status["status"] = "degraded"
-                elif unmapped_count > 0:
-                    health_status["components"]["campaign_mappings"] = {
-                        "status": "degraded",
-                        "message": f"Found {unmapped_count} unmapped campaigns",
-                        "mapping_count": mapping_count,
-                        "unmapped_count": unmapped_count,
-                        "by_source": source_counts
-                    }
-                    
-                    if health_status["status"] == "healthy":
-                        health_status["status"] = "degraded"
-                else:
-                    health_status["components"]["campaign_mappings"] = {
-                        "status": "healthy",
-                        "message": "All campaigns are mapped",
-                        "mapping_count": mapping_count,
-                        "by_source": source_counts
-                    }
-            except Exception as e:
-                health_status["components"]["campaign_mappings"] = {
-                    "status": "degraded",
-                    "error": f"Error checking unmapped campaigns: {str(e)}",
-                    "mapping_count": mapping_count
-                }
-                
-                if health_status["status"] == "healthy":
-                    health_status["status"] = "degraded"
-        else:
-            health_status["components"]["campaign_mappings"] = {
-                "status": "degraded",
-                "error": "Campaign mapping table does not exist"
-            }
-            
-            if health_status["status"] == "healthy":
-                health_status["status"] = "degraded"
-    except Exception as e:
-        health_status["status"] = "degraded"
-        health_status["components"]["campaign_mappings"] = {
-            "status": "unhealthy",
-            "error": f"Error checking campaign mappings: {str(e)}"
-        }
-    
-    return health_status
-
 # Simple health check endpoint that doesn't depend on database
 @app.get("/api/health", tags=["Health"])
 async def simple_health_check():
@@ -1178,8 +973,7 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
                 uc.campaign_name as campaign_name,
                 uc.network as network
             FROM unique_campaigns uc
-            LEFT JOIN campaign_mappings cm 
-                ON uc.campaign_id = cm.external_campaign_id 
+            LEFT JOIN campaign_mappings cm ON uc.campaign_id = cm.external_campaign_id 
                 AND cm.source_system = 'Google Ads'
             WHERE cm.id IS NULL
             ORDER BY uc.campaign_name
@@ -1234,8 +1028,7 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
                 uc.campaign_name as campaign_name,
                 uc.network as network
             FROM unique_campaigns uc
-            LEFT JOIN campaign_mappings cm 
-                ON uc.campaign_id = cm.external_campaign_id 
+            LEFT JOIN campaign_mappings cm ON uc.campaign_id = cm.external_campaign_id 
                 AND cm.source_system = 'Bing Ads'
             WHERE cm.id IS NULL
             ORDER BY uc.campaign_name
@@ -1520,49 +1313,232 @@ async def root_health_check():
         "timestamp": datetime.datetime.now().isoformat()
     }
 
-def mount_static_files():
-    """Mount static files after all API routes are registered"""
-    frontend_build_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                                      "src", "frontend", "build")
-    
-    # Check if the frontend build directory exists
-    if os.path.exists(frontend_build_path):
-        logger.info(f"Mounting frontend build directory: {frontend_build_path}")
-        
-        # Create a custom StaticFiles instance for serving the index.html file
-        # for any routes that would otherwise 404 (for client-side routing)
-        class SPAStaticFiles(StaticFiles):
-            async def get_response(self, request, path):
-                # Skip API routes completely - don't try to serve them as static files
-                if path.startswith("api/") or path.startswith("/api/"):
-                    logger.debug(f"API path detected: {path}, letting it pass through to FastAPI routes")
-                    # Don't handle API routes in the static file handler
-                    # FastAPI will handle them properly
-                    raise HTTPException(status_code=404)
-                    
-                logger.debug(f"Static files request for path: {path}")
-                try:
-                    # Try to serve the path as requested
-                    return await super().get_response(request, path)
-                except HTTPException as e:
-                    # If path not found and status is 404, serve index.html
-                    if e.status_code == 404:
-                        logger.debug(f"Path {path} not found, serving index.html")
-                        index_path = os.path.join(frontend_build_path, "index.html")
-                        if os.path.exists(index_path):
-                            return FileResponse(index_path)
-                    # Re-raise the exception if not a 404 or index.html doesn't exist
-                    raise e
-        
-        # Mount the static files directory for /static path
-        app.mount("/static", StaticFiles(directory=os.path.join(frontend_build_path, "static")), name="static")
-        
-        # Mount the frontend build directory LAST, after all API routes are defined
-        # This ensures API endpoints take precedence
-        app.mount("/", SPAStaticFiles(directory=frontend_build_path, html=True), name="frontend")
-        
-        logger.info("Frontend build directory mounted successfully")
-    else:
-        logger.warning(f"Frontend build directory not found at {frontend_build_path}. Frontend will not be served.")
+DATABASE_URL = get_database_url()
 
-mount_static_files()
+# Global variable to track if DB monitor was initialized
+db_monitor_initialized = False
+
+try:
+    # Use the new retry mechanism for establishing the database connection
+    logger.info("Attempting to connect to database with retry mechanism")
+    engine = connect_with_retry(max_retries=5, delay=5)
+    
+    # Initialize the database monitor
+    try:
+        db_monitor = initialize_monitor(
+            database_url=DATABASE_URL,
+            check_interval=60,  # Check every minute in production
+            pool_recycle=300    # Recycle connections every 5 minutes
+        )
+        db_monitor_initialized = True
+        logger.info("Database monitoring initialized and started")
+    except Exception as e:
+        logger.error(f"Failed to initialize database monitor: {str(e)}")
+        logger.warning("Application will continue without database monitoring")
+    
+    # Startup event to initialize database without blocking app startup
+    @app.on_event("startup")
+    async def startup_event():
+        """
+        Initialize database on startup without blocking the app from starting
+        """
+        logger.info("Application starting up...")
+        
+        # Run in a separate thread to avoid blocking the app startup
+        def init_db_async():
+            try:
+                # First, ensure the network column exists in the sm_fact_bing_ads table
+                # This is a critical fix that needs to run before other operations
+                logger.info("Checking for network column in sm_fact_bing_ads table...")
+                network_column_exists = ensure_network_column_exists()
+                if network_column_exists:
+                    logger.info("Network column check completed successfully")
+                else:
+                    logger.warning("Failed to ensure network column exists - application may encounter errors")
+                
+                # Then initialize the database normally
+                logger.info("Initializing database...")
+                engine, connection = initialize_database()
+                if engine and connection:
+                    logger.info("Database initialized successfully")
+                else:
+                    logger.error("Failed to initialize database")
+            except Exception as e:
+                logger.error(f"Error during database initialization: {e}")
+                logger.error(traceback.format_exc())
+        
+        # Start the initialization in a separate thread
+        import threading
+        db_thread = threading.Thread(target=init_db_async)
+        db_thread.daemon = True  # Allow the thread to exit when the main thread exits
+        db_thread.start()
+        logger.info("Database initialization started in background thread")
+    
+    # Add a global on_startup handler to verify DB connection when app starts
+    @app.on_event("startup")
+    def startup_db_client():
+        logger.info("FastAPI startup: Checking database connection")
+        try:
+            # Log the status
+            status = get_db_status()
+            if status["is_connected"]:
+                logger.info(f"Database connection successful at startup")
+            else:
+                logger.warning(f"Database not connected at startup: {status.get('last_error', 'Unknown error')}")
+                # Try to force a reconnect
+                reconnect_result = force_db_reconnect()
+                logger.info(f"Forced reconnection result: {reconnect_result}")
+        except Exception as e:
+            logger.error(f"Error during startup database check: {str(e)}")
+    
+    # Add a global on_shutdown handler to shutdown the DB connection when app stops
+    @app.on_event("shutdown")
+    def shutdown_db_client():
+        logger.info("FastAPI shutdown: Closing database connections")
+        try:
+            if engine:
+                engine.dispose()
+            logger.info("Database connections closed")
+        except Exception as e:
+            logger.error(f"Error closing database connections: {str(e)}")
+    
+    # Set up the session factory
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    # Initialize database at startup
+    try:
+        initialize_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+except Exception as e:
+    logger.critical(f"Failed to connect to database: {str(e)}")
+    # Note: We don't want to crash the server here, so we'll continue
+    # The database connection will be retried in the connect_with_retry function
+
+# Dependency
+def get_db():
+    if SessionLocal is None:
+        # We hit this case when database connection could not be established initially
+        # Generate a unique error ID for tracking
+        error_id = str(uuid.uuid4())
+        logger.error(f"Database connection unavailable. Error ID: {error_id}")
+        # Try to reconnect to the database
+        try:
+            logger.info("Attempting to reconnect to database...")
+            force_db_reconnect()
+            # If successful, this should update the global SessionLocal
+        except Exception as reconnect_error:
+            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
+        
+        # Still raise an exception to inform the client
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database unavailable. Error ID: {error_id}"
+        )
+    
+    db = None
+    try:
+        db = SessionLocal()
+        yield db
+    except OperationalError as e:
+        # Handle database connection errors
+        logger.error(f"Database session error: {str(e)}")
+        error_id = str(uuid.uuid4())
+        logger.error(f"Error ID: {error_id}")
+        
+        # Try to reconnect
+        try:
+            logger.info("Attempting to reconnect to database...")
+            force_db_reconnect()
+        except Exception as reconnect_error:
+            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database connection error. Error ID: {error_id}"
+        )
+    except Exception as e:
+        # Handle other database errors
+        logger.error(f"Database session exception: {str(e)}")
+        raise
+    finally:
+        if db:
+            db.close()
+
+# Health check endpoint for verifying server status
+@app.get("/health")
+def health_check():
+    """
+    Simple health check endpoint that doesn't depend on the database.
+    This is used for basic health checks to verify the service is running.
+    """
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "message": "API server is running. For detailed diagnostics, use /api/health or /api/db-status"
+    }
+
+# Simple health check endpoint that doesn't depend on database
+@app.get("/api/simple-health")
+def simple_health_check():
+    """
+    A simple health check endpoint that doesn't depend on the database.
+    This is used by Railway for health checks to ensure the service is running.
+    """
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "message": "API server is running"
+    }
+
+# Health check endpoint to test CORS headers
+@app.get("/api/cors-test")
+def test_cors(request: Request):
+    """
+    Test endpoint to verify CORS configuration
+    Returns details about the CORS configuration to help with debugging
+    """
+    headers = dict(request.headers)
+    
+    # Mask sensitive headers for security
+    for sensitive_header in ['authorization', 'cookie', 'sec-websocket-key']:
+        if sensitive_header in headers:
+            headers[sensitive_header] = "[REDACTED]"
+    
+    # Get the origin from the request headers if present
+    origin = headers.get('origin', None)
+    
+    # Determine if this origin is allowed
+    origin_allowed = False
+    if origin:
+        origin_allowed = origin in allowed_origins or "*" in allowed_origins
+    
+    # Create a detailed CORS report
+    cors_details = {
+        "configured_allowed_origins": allowed_origins,
+        "request_origin": origin,
+        "origin_allowed": origin_allowed,
+        "allow_credentials": allow_credentials,
+        "allowed_methods": allowed_methods,
+        "allowed_headers": allowed_headers
+    }
+    
+    # Include current CORS settings
+    response = {
+        "status": "ok",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "message": "CORS test endpoint",
+        "request_headers": headers,
+        "cors_configuration": cors_details,
+        "server_info": {
+            "frontend_build_path": os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                      "src", "frontend", "build"),
+            "environment": os.environ.get("ENVIRONMENT", "unknown"),
+            "port": os.environ.get("PORT", "8080"),
+            "database_url_format": get_safe_db_url_for_display()
+        }
+    }
+    
+    # Add CORS headers to the response
+    return response
