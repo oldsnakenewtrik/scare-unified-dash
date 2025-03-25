@@ -82,6 +82,96 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# Pydantic models for API response
+class MetricsSummary(BaseModel):
+    date: datetime.date
+    total_clicks: int
+    total_impressions: int
+    total_cost: float
+    total_conversions: float
+    total_revenue: float
+    website_visitors: int
+    salesforce_leads: int
+    opportunities: int
+    closed_won: int
+
+class DateRangeParams(BaseModel):
+    start_date: datetime.date
+    end_date: datetime.date
+    campaign_name: Optional[str] = None
+    source_system: Optional[str] = None
+
+class CampaignMetrics(BaseModel):
+    campaign_id: int
+    campaign_name: str
+    source_system: str
+    is_active: bool
+    date: datetime.date
+    impressions: int
+    clicks: int
+    spend: float
+    revenue: float
+    conversions: float
+    cpc: float
+    smooth_leads: int
+    total_sales: int
+    users: int
+
+class CampaignMappingCreate(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    pretty_campaign_name: str
+    campaign_category: Optional[str] = None
+    campaign_type: Optional[str] = None
+    network: Optional[str] = None
+    pretty_network: Optional[str] = None
+    pretty_source: Optional[str] = None
+    display_order: Optional[int] = None
+
+class CampaignMapping(CampaignMappingCreate):
+    id: int
+    is_active: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+class CampaignSource(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    network: Optional[str] = None
+
+class CampaignOrderUpdate(BaseModel):
+    id: int
+    display_order: int
+
+class MetricsSummaryHierarchical(BaseModel):
+    impressions: Optional[int] = None
+    clicks: Optional[int] = None
+    conversions: Optional[float] = None
+    cost: Optional[float] = None
+
+class CampaignHierarchical(BaseModel):
+    id: int
+    source_system: str
+    external_campaign_id: str
+    original_campaign_name: str
+    pretty_campaign_name: str
+    campaign_category: Optional[str] = None
+    campaign_type: Optional[str] = None
+    network: Optional[str] = None
+    display_order: int
+    impressions: Optional[int] = None
+    clicks: Optional[int] = None
+    conversions: Optional[float] = None
+    cost: Optional[float] = None
+
+class UnmappedCampaign(BaseModel):
+    source_system: str
+    external_campaign_id: str
+    campaign_name: str
+    network: Optional[str] = None
+
 # Debug print to verify app initialization
 print("DEBUG: FastAPI app initialized!")
 
