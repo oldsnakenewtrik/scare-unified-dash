@@ -264,32 +264,44 @@ except ImportError as e:
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
 
-# Debug print to verify mount order
-print("DEBUG: About to mount static files")
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
-# FIXED: Mount static files at /static instead of root path to avoid intercepting API routes
-frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "build")
-if os.path.exists(frontend_dir):
-    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
-    print(f"DEBUG: Static files mounted at /static from {frontend_dir}")
-else:
-    print(f"DEBUG: Frontend build directory not found at {frontend_dir}")
+# Set up paths
+frontend_build_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                  "src", "frontend", "build")
 
-# Add a catch-all route to serve index.html for client-side routing
-@app.get("/{full_path:path}")
-async def serve_frontend(full_path: str):
-    # Skip API paths - let them 404 naturally if not defined
-    if full_path.startswith("api/"):
-        return {"error": "API endpoint not found", "path": full_path, "status_code": 404}
+# Check if the frontend build directory exists
+if os.path.exists(frontend_build_path):
+    logger.info(f"Mounting frontend build directory: {frontend_build_path}")
     
-    # For any other path, serve the frontend index.html
-    index_path = os.path.join(frontend_dir, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    else:
-        return {"error": "Frontend not built", "status_code": 404}
-
-print("DEBUG: All routes registered, ready to handle requests")
+    # Create a custom StaticFiles instance for serving the index.html file
+    # for any routes that would otherwise 404 (for client-side routing)
+    class SPAStaticFiles(StaticFiles):
+        async def get_response(self, request, path):
+            logger.debug(f"Static files request for path: {path}")
+            try:
+                # Try to serve the path as requested
+                return await super().get_response(request, path)
+            except HTTPException as e:
+                # If path not found and status is 404, serve index.html
+                if e.status_code == 404:
+                    logger.debug(f"Path {path} not found, serving index.html")
+                    index_path = os.path.join(frontend_build_path, "index.html")
+                    if os.path.exists(index_path):
+                        return FileResponse(index_path)
+                # Re-raise the exception if not a 404 or index.html doesn't exist
+                raise e
+    
+    # Mount the static files directory first, with specific path priority
+    # API endpoints get priority over static files with the same path
+    app.mount("/static", StaticFiles(directory=os.path.join(frontend_build_path, "static")), name="static")
+    app.mount("/", SPAStaticFiles(directory=frontend_build_path, html=True), name="frontend")
+    
+    logger.info("Frontend build directory mounted successfully")
+else:
+    logger.warning(f"Frontend build directory not found at {frontend_build_path}. Frontend will not be served.")
 
 # Database connection
 DATABASE_URL = get_database_url()
