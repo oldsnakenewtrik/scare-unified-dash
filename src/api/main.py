@@ -1146,55 +1146,129 @@ async def get_campaign_metrics(
 @app.get("/api/campaign-mappings", tags=["Campaigns"])
 async def get_campaign_mappings(db=Depends(get_db)):
     """
-    Get all campaign mappings
+    Get all campaign mappings in the system
     """
+    logger.info("Campaign mappings endpoint called")
     try:
-        logger.info("Fetching campaign mappings")
+        # Check if the table exists
+        table_exists_query = text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'sm_campaign_name_mapping'
+            )
+        """)
+        table_exists = db.execute(table_exists_query).scalar()
         
-        # Query campaign mappings
+        if not table_exists:
+            logger.warning("Campaign mappings table does not exist")
+            return []
+            
+        # Query all mappings
         query = text("""
-            SELECT 
-                id,
-                source_system,
-                external_campaign_id,
-                original_campaign_name,
-                pretty_campaign_name,
-                campaign_category,
-                campaign_type,
-                network,
-                pretty_network,
-                pretty_source,
-                display_order,
-                is_active,
-                created_at,
-                updated_at
-            FROM campaign_mappings
-            ORDER BY display_order, pretty_campaign_name
+            SELECT id, source_system, external_campaign_id, campaign_name, created_at, updated_at
+            FROM public.sm_campaign_name_mapping
+            ORDER BY source_system, campaign_name
         """)
         
-        result = db.execute(query)
+        result = db.execute(query).fetchall()
         
-        mappings = []
-        for row in result:
-            mapping = dict(row._mapping)
-            # Convert datetime objects to ISO strings for JSON serialization
-            if 'created_at' in mapping and mapping['created_at']:
-                mapping['created_at'] = mapping['created_at'].isoformat()
-            if 'updated_at' in mapping and mapping['updated_at']:
-                mapping['updated_at'] = mapping['updated_at'].isoformat()
-            
-            mappings.append(mapping)
+        # Convert to list of dictionaries
+        mappings = [
+            {
+                "id": row[0],
+                "source_system": row[1],
+                "external_campaign_id": row[2],
+                "campaign_name": row[3],
+                "created_at": row[4].isoformat() if row[4] else None,
+                "updated_at": row[5].isoformat() if row[5] else None
+            }
+            for row in result
+        ]
         
         return mappings
-        
-    except SQLAlchemyError as e:
-        error_msg = f"Database error fetching campaign mappings: {str(e)}"
-        logger.error(error_msg)
-        return {"error": error_msg, "status": "error"}
     except Exception as e:
-        error_msg = f"Error fetching campaign mappings: {str(e)}"
-        logger.error(error_msg)
-        return {"error": error_msg, "status": "error"}
+        logger.error(f"Error getting campaign mappings: {str(e)}")
+        # Return empty array to prevent frontend errors
+        return []
+
+@app.get("/api/unmapped-campaigns", tags=["Campaigns"])
+async def get_unmapped_campaigns(db=Depends(get_db)):
+    """
+    Get all campaigns that don't have a mapping
+    """
+    logger.info("Unmapped campaigns endpoint called")
+    try:
+        # First check if required tables exist
+        tables_query = text("""
+            SELECT tablename FROM pg_tables 
+            WHERE schemaname = 'public' 
+            AND tablename IN ('sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack', 'sm_campaign_name_mapping')
+        """)
+        
+        existing_tables = [row[0] for row in db.execute(tables_query).fetchall()]
+        required_tables = ['sm_fact_google_ads', 'sm_fact_bing_ads', 'sm_fact_matomo', 'sm_fact_redtrack', 'sm_campaign_name_mapping']
+        
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if missing_tables:
+            logger.warning(f"Missing required tables: {missing_tables}")
+            return []
+            
+        # Query unmapped campaigns
+        query = text("""
+            WITH all_campaigns AS (
+                SELECT DISTINCT 'Google Ads' as source, CAST(campaign_id AS VARCHAR) as id, 
+                       campaign_name as name
+                FROM public.sm_fact_google_ads 
+                WHERE campaign_id IS NOT NULL
+                
+                UNION ALL
+                
+                SELECT DISTINCT 'Bing Ads' as source, CAST(campaign_id AS VARCHAR) as id,
+                       campaign_name as name
+                FROM public.sm_fact_bing_ads 
+                WHERE campaign_id IS NOT NULL
+                
+                UNION ALL
+                
+                SELECT DISTINCT 'Matomo' as source, CAST(campaign_id AS VARCHAR) as id,
+                       campaign_name as name 
+                FROM public.sm_fact_matomo 
+                WHERE campaign_id IS NOT NULL
+                
+                UNION ALL
+                
+                SELECT DISTINCT 'RedTrack' as source, CAST(campaign_id AS VARCHAR) as id,
+                       campaign_name as name
+                FROM public.sm_fact_redtrack 
+                WHERE campaign_id IS NOT NULL
+            )
+            SELECT ac.source, ac.id, ac.name
+            FROM all_campaigns ac
+            LEFT JOIN public.sm_campaign_name_mapping m 
+              ON ac.source = m.source_system AND ac.id = m.external_campaign_id
+            WHERE m.id IS NULL
+            ORDER BY ac.source, ac.name
+        """)
+        
+        result = db.execute(query).fetchall()
+        
+        # Convert to list of dictionaries
+        unmapped_campaigns = [
+            {
+                "source_system": row[0],
+                "external_campaign_id": row[1],
+                "campaign_name": row[2]
+            }
+            for row in result
+        ]
+        
+        return unmapped_campaigns
+    except Exception as e:
+        logger.error(f"Error getting unmapped campaigns: {str(e)}")
+        # Return empty array to prevent frontend errors
+        return []
 
 @app.post("/api/campaign-mappings", tags=["Campaigns"])
 async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
@@ -1731,3 +1805,28 @@ def reconnect_database():
                 "error_id": error_id
             }
         )
+
+# Root endpoint for quick testing
+@app.get("/", tags=["Root"])
+async def root():
+    """
+    Root endpoint for testing basic connectivity
+    """
+    logger.info("Root endpoint called")
+    return {
+        "message": "SCARE Unified Dashboard API is running",
+        "version": "0.1.0",
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
+# Additional health check without the /api prefix
+@app.get("/health", tags=["Health"])
+async def root_health_check():
+    """
+    Simple health check without the /api prefix
+    """
+    logger.info("Root health check called")
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now().isoformat()
+    }
