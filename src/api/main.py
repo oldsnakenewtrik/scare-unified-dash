@@ -85,39 +85,18 @@ app = FastAPI(
 # Debug print to verify app initialization
 print("DEBUG: FastAPI app initialized!")
 
-# Setup CORS middleware with explicit origins from environment variable
-# This allows us to set CORS in Railway variables instead of hardcoding
-cors_origins_str = os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5000")
-cors_origins = cors_origins_str.split(",")
-
-# Add default frontend URL for Railway if not already in the list
-railway_frontend = "https://front-production-f6e6.up.railway.app"
-if railway_frontend not in cors_origins:
-    cors_origins.append(railway_frontend)
-
-# Determine if we should allow credentials
-allow_credentials = os.environ.get("CORS_CREDENTIALS", "true").lower() == "true"
-
-# Log CORS settings for debugging
-print(f"CORS origins configured: {cors_origins}")
-print(f"CORS credentials allowed: {allow_credentials}")
-
-# Get allowed methods and headers from environment, or default to all
-cors_methods = os.environ.get("CORS_METHODS", "GET,POST,PUT,DELETE,OPTIONS").split(",")
-cors_headers = os.environ.get("CORS_HEADERS", "Content-Type,Authorization,Accept").split(",")
-
-print(f"CORS methods: {cors_methods}")
-print(f"CORS headers: {cors_headers}")
-
-# Configure CORS middleware
+# CORS middleware setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=cors_methods,
-    allow_headers=cors_headers,
-    expose_headers=["Content-Type", "X-Total-Count"],
-    max_age=600,  # 10 minutes cache for preflight requests
+    allow_origins=[
+        "http://localhost:3000",
+        "https://front-production-f6e6.up.railway.app",
+        "https://scare-unified-dash-production.up.railway.app",
+        "*"  # Temporarily allow all origins for testing
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Import and include the health check router
