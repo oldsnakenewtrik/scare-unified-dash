@@ -69,6 +69,9 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
   try {
     const response = await axios.get(fullUrl, axiosConfig);
     
+    // Log the raw response for debugging
+    console.log(`Raw response from ${endpoint}:`, response);
+    
     // Handle the case where the API returns a 404 inside a 200 response
     // This is not ideal but sometimes happens with certain backend implementations
     if (response?.data?.status === 404) {
@@ -106,8 +109,17 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
       throw new Error(`API endpoint ${endpoint} returned 404 status inside 200 response`);
     }
     
-    // Return the response data
-    return response;
+    // Standardize the response data format
+    // This handles various response shapes and ensures data is always accessible consistently
+    const standardizedResponse = {
+      ...response,
+      data: standardizeResponseData(response.data, endpoint)
+    };
+    
+    console.log(`Standardized response from ${endpoint}:`, standardizedResponse);
+    
+    // Return the standardized response
+    return standardizedResponse;
   } catch (error) {
     // Log detailed error information
     console.error(`Error calling API endpoint ${endpoint}:`, error);
@@ -148,6 +160,46 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
     // Re-throw the error for non-critical endpoints
     throw error;
   }
+};
+
+/**
+ * Standardizes API response data to ensure consistent access patterns
+ * This handles both direct arrays, objects, and nested data structures
+ * @param {any} responseData - The raw response data from the API
+ * @param {string} endpoint - The API endpoint for context logging
+ * @returns {Array|Object} - The standardized response data
+ */
+const standardizeResponseData = (responseData, endpoint) => {
+  // Log the raw data type to help with debugging
+  console.log(`Response data type from ${endpoint}:`, typeof responseData, 
+    Array.isArray(responseData) ? 'array' : 'not array');
+  
+  // Case 1: responseData is already an array - return directly
+  if (Array.isArray(responseData)) {
+    console.log(`${endpoint} returned direct array with ${responseData.length} items`);
+    return responseData;
+  }
+  
+  // Case 2: responseData has a data property that is an array
+  if (responseData && typeof responseData === 'object' && Array.isArray(responseData.data)) {
+    console.log(`${endpoint} returned nested array with ${responseData.data.length} items`);
+    return responseData.data;
+  }
+  
+  // Case 3: responseData has a data property that contains another data array (double nesting)
+  if (responseData && 
+      typeof responseData === 'object' && 
+      responseData.data && 
+      typeof responseData.data === 'object' && 
+      Array.isArray(responseData.data.data)) {
+    console.log(`${endpoint} returned double-nested array with ${responseData.data.data.length} items`);
+    return responseData.data.data;
+  }
+  
+  // Case 4: responseData is an object or other non-array - return as is
+  // This handles the case of returning objects from API endpoints
+  console.log(`${endpoint} returned non-array data:`, responseData);
+  return responseData;
 };
 
 /**
