@@ -41,23 +41,20 @@ console.log('Final API base URL:', API_BASE_URL);
 
 /**
  * Make a direct API request
- * @param {string} method HTTP method (GET, POST, PUT, DELETE)
  * @param {string} endpoint API endpoint (e.g., '/api/campaigns')
+ * @param {string} method HTTP method (GET, POST, PUT, DELETE)
  * @param {Object} params URL parameters for GET requests
  * @param {Object} data Request body for POST/PUT requests
  * @returns {Promise} Axios promise with the response data
  */
-export const fetchThroughProxy = async (method, endpoint, params = {}, data = null) => {
-  const url = endpoint.startsWith('/') 
-    ? `${API_BASE_URL}${endpoint}` 
-    : `${API_BASE_URL}/${endpoint}`;
-    
+export const fetchThroughProxy = async (endpoint, method = 'get', params = {}, data = {}) => {
+  const url = `${API_BASE_URL}${endpoint}`;
+  
   try {
-    console.log(`Making API call to ${url}`, { method, params });
+    console.log(`Making API call to ${url}`, {method, params});
     
-    // Temporarily try without credentials to see if that resolves the CORS issue
     const response = await axios({
-      method: method,
+      method,
       url: url,
       params: params,
       data: data,
@@ -72,172 +69,63 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     if (response.data && response.data.error && response.data.status_code === 404) {
       console.error(`API endpoint returned 404 inside 200 response: ${endpoint}`);
       
-      // For campaign-mappings, return an empty array instead of throwing
-      if (endpoint.includes('campaign-mappings')) {
-        console.log('Returning empty array for campaign-mappings instead of error');
-        return [];
-      }
-      
-      // For campaign-metrics, return empty metrics data
-      if (endpoint.includes('campaign-metrics')) {
-        console.log('Returning empty metrics data instead of error');
-        return [];
+      // Return empty arrays for these endpoints instead of throwing errors
+      if (endpoint.includes('campaign-mappings') || 
+          endpoint.includes('campaign-metrics') || 
+          endpoint.includes('campaigns-hierarchical') || 
+          endpoint.includes('unmapped-campaigns')) {
+        console.log(`Returning empty array for ${endpoint} instead of error`);
+        return { data: [] };
       }
       
       // For other endpoints, throw a more helpful error
       throw new Error(`API endpoint not available: ${endpoint}`);
     }
     
-    // Enhanced API response handling for critical endpoints
-    if (endpoint.includes('/api/')) {
-      // Check specific endpoints that require special handling
-      if (endpoint.includes('campaigns-performance')) {
-        console.log('Processing campaigns-performance endpoint');
-        // This endpoint needs data formatted for forEach() operations in UnifiedDashboard.js
-        if (!Array.isArray(response.data)) {
-          // Try to find the performance data array in standard locations
-          if (response.data && typeof response.data === 'object') {
-            const possibleArrayProps = ['performance', 'campaigns', 'data', 'results', 'records'];
-            let foundArrayProp = null;
-            
-            // Check common property names first
-            for (const prop of possibleArrayProps) {
-              if (response.data[prop] && Array.isArray(response.data[prop])) {
-                console.log(`Found performance data in '${prop}' property with ${response.data[prop].length} items`);
-                foundArrayProp = prop;
-                break;
-              }
-            }
-            
-            if (foundArrayProp) {
-              response.data = response.data[foundArrayProp];
-            } else {
-              // Create empty array as fallback - better to show no data than crash
-              console.warn('No performance data array found in response, using empty array');
-              response.data = [];
-            }
-          } else {
-            console.warn('Unexpected response format, using empty array');
-            response.data = [];
-          }
-        }
-      } else if (endpoint.includes('unmapped-campaigns')) {
-        console.log('Processing unmapped-campaigns endpoint');
-        // This endpoint needs an array for .filter() in CampaignMapping.js
-        if (!Array.isArray(response.data)) {
-          if (response.data && typeof response.data === 'object') {
-            // Try to find the unmapped campaigns array
-            const possibleArrayProps = ['unmapped_campaigns', 'campaigns', 'data'];
-            let foundArray = false;
-            
-            for (const prop of possibleArrayProps) {
-              if (response.data[prop] && Array.isArray(response.data[prop])) {
-                console.log(`Found unmapped campaigns in '${prop}' property`);
-                response.data = response.data[prop];
-                foundArray = true;
-                break;
-              }
-            }
-            
-            if (!foundArray) {
-              console.warn('No unmapped campaigns array found, using empty array');
-              response.data = [];
-            }
-          } else {
-            console.warn('Unexpected unmapped-campaigns format, using empty array');
-            response.data = [];
-          }
-        }
-      } else if (endpoint.includes('campaigns-hierarchical')) {
-        console.log('Processing campaigns-hierarchical endpoint');
-        // This endpoint needs to return an array for the dashboard
-        if (!Array.isArray(response.data)) {
-          if (response.data && typeof response.data === 'object') {
-            // Check for common array properties
-            const possibleArrayProps = ['campaigns', 'hierarchical_campaigns', 'data', 'results'];
-            let foundArray = false;
-            
-            for (const prop of possibleArrayProps) {
-              if (response.data[prop] && Array.isArray(response.data[prop])) {
-                console.log(`Found hierarchical campaigns in '${prop}' property`);
-                response.data = response.data[prop];
-                foundArray = true;
-                break;
-              }
-            }
-            
-            // If we can't find an array property but there are keys, return empty array
-            // DO NOT convert non-array objects to single-item arrays as this breaks filtering
-            if (!foundArray) {
-              console.warn('No hierarchical campaigns array found, using empty array');
-              response.data = [];
-            }
-          } else {
-            console.warn('Unexpected hierarchical campaigns format, using empty array');
-            response.data = [];
-          }
-        }
-      } else if (endpoint.includes('campaign-mappings')) {
-        console.log('Processing campaign-mappings endpoint');
-        // This endpoint needs an array for rendering the mapping table
-        if (!Array.isArray(response.data)) {
-          if (response.data && typeof response.data === 'object') {
-            // Try to find the campaign mappings array
-            const possibleArrayProps = ['mappings', 'campaign_mappings', 'data', 'results'];
-            let foundArray = false;
-            
-            for (const prop of possibleArrayProps) {
-              if (response.data[prop] && Array.isArray(response.data[prop])) {
-                console.log(`Found campaign mappings in '${prop}' property`);
-                response.data = response.data[prop];
-                foundArray = true;
-                break;
-              }
-            }
-            
-            if (!foundArray) {
-              // Check if the response itself can be treated as an array
-              const keys = Object.keys(response.data);
-              if (keys.length > 0 && response.data[keys[0]] && typeof response.data[keys[0]] === 'object') {
-                // Try to convert object of objects to array
-                const mappingsArray = keys.map(key => ({
-                  id: key,
-                  ...response.data[key]
-                }));
-                console.log(`Converted object to array with ${mappingsArray.length} items`);
-                response.data = mappingsArray;
-                foundArray = true;
-              }
-            }
-            
-            if (!foundArray) {
-              console.warn('No campaign mappings array found, using empty array');
-              response.data = [];
-            }
-          } else {
-            console.warn('Unexpected campaign mappings format, using empty array');
-            response.data = [];
-          }
-        }
-      }
-      
-      // Always log the final processed data structure
-      console.log(`Final processed ${endpoint} data:`, 
-        Array.isArray(response.data) 
-          ? `Array with ${response.data.length} items` 
-          : typeof response.data);
+    // Handle the case where response.data might not be an array for endpoints that should return arrays
+    if ((endpoint.includes('campaign-mappings') || 
+         endpoint.includes('campaign-metrics') || 
+         endpoint.includes('campaigns-hierarchical') || 
+         endpoint.includes('unmapped-campaigns')) && 
+        (!response.data || !Array.isArray(response.data))) {
+      console.warn(`API endpoint ${endpoint} returned non-array response:`, response.data);
+      return { data: [] };
     }
     
-    return response.data;
+    // Return response data in a consistent format
+    return { data: Array.isArray(response.data) ? response.data : [] };
   } catch (error) {
-    console.error(`API call to ${url} failed:`, error.message);
-    
-    // For campaign endpoints, return empty arrays instead of throwing
-    if (endpoint.includes('campaign')) {
-      console.log(`Returning empty array for ${endpoint} after error`);
-      return [];
+    // Handle specific error cases with custom behavior
+    if (error.response) {
+      // Server responded with a status code outside of 2xx range
+      console.error(`API call to ${url} failed with status ${error.response.status}:`, error.response.data);
+      
+      // Return empty arrays for critical endpoints instead of throwing errors
+      if (endpoint.includes('campaign-mappings') || 
+          endpoint.includes('campaign-metrics') || 
+          endpoint.includes('campaigns-hierarchical') || 
+          endpoint.includes('unmapped-campaigns')) {
+        console.log(`Returning empty array for ${endpoint} after error`);
+        return { data: [] };
+      }
+    } else if (error.request) {
+      // Request was made but no response received
+      console.error(`API call to ${url} failed: No response received`, error.request);
+    } else {
+      // Something else happened while setting up the request
+      console.error(`API call to ${url} failed: ${error.message}`);
     }
     
+    // For certain endpoints, don't throw but return an empty array
+    if (endpoint.includes('campaign-mappings') || 
+        endpoint.includes('campaign-metrics') || 
+        endpoint.includes('campaigns-hierarchical') || 
+        endpoint.includes('unmapped-campaigns')) {
+      console.log(`Returning empty array for ${endpoint} after error`);
+      return { data: [] };
+    }
+    
+    // For all other endpoints or errors, throw the error to be handled by caller
     throw error;
   }
 };
@@ -249,7 +137,7 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
  * @returns {Promise} Axios promise with the response data
  */
 export const getWithProxy = (endpoint, params = {}) => {
-  return fetchThroughProxy('get', endpoint, params);
+  return fetchThroughProxy(endpoint, 'get', params);
 };
 
 /**
@@ -259,7 +147,7 @@ export const getWithProxy = (endpoint, params = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const postWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy('post', endpoint, {}, data);
+  return fetchThroughProxy(endpoint, 'post', {}, data);
 };
 
 /**
@@ -269,7 +157,7 @@ export const postWithProxy = (endpoint, data = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const putWithProxy = (endpoint, data = {}) => {
-  return fetchThroughProxy('put', endpoint, {}, data);
+  return fetchThroughProxy(endpoint, 'put', {}, data);
 };
 
 /**
@@ -278,7 +166,7 @@ export const putWithProxy = (endpoint, data = {}) => {
  * @returns {Promise} Axios promise with the response data
  */
 export const deleteWithProxy = (endpoint) => {
-  return fetchThroughProxy('delete', endpoint);
+  return fetchThroughProxy(endpoint, 'delete');
 };
 
 export default {

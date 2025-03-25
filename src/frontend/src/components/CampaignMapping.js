@@ -123,47 +123,49 @@ function CampaignMapping() {
         sourceSystem ? { source_system: sourceSystem } : {}
       );
       
+      // Ensure we have a valid response data array - consistent access pattern
+      const mappedData = mappedResponse?.data || [];
+      
       console.log(`Fetching unmapped campaigns...`);
       // Fetch all unmapped campaigns
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
+      // Ensure we have a valid response data array - consistent access pattern
+      const allUnmapped = unmappedResponse?.data || [];
+      
       // Filter unmapped campaigns by source if needed
-      const allUnmapped = unmappedResponse.data;
-      const filteredUnmapped = sourceSystem 
-        ? allUnmapped.filter(c => c.source_system === sourceSystem)
+      const filteredUnmapped = sourceSystem && allUnmapped.length > 0
+        ? allUnmapped.filter(c => c && c.source_system === sourceSystem)
         : allUnmapped;
       
-      console.log(`Received ${mappedResponse.data.length} mapped campaigns and ${filteredUnmapped.length} unmapped campaigns`);
+      console.log(`Received ${mappedData.length} mapped campaigns and ${filteredUnmapped.length} unmapped campaigns`);
       
-      setMappedCampaigns(mappedResponse.data);
+      setMappedCampaigns(mappedData);
       setUnmappedCampaigns(filteredUnmapped);
     } catch (err) {
       console.error('Error fetching campaign mapping data:', err);
       
+      // Set empty arrays as fallback
+      setMappedCampaigns([]);
+      setUnmappedCampaigns([]);
+      
       // Provide more detailed error information
-      let errorMessage = 'Failed to fetch campaign data. ';
+      let errorMessage = 'Failed to fetch campaign data. This could be due to database migration issues. Please try again later.';
       
       if (err.code === 'ECONNABORTED') {
-        errorMessage += 'The request timed out. The server might be under heavy load or the dataset might be too large.';
+        errorMessage += ' The request timed out. The server might be under heavy load or the dataset might be too large.';
       } else if (err.response) {
         // The server responded with a status code outside the 2xx range
-        errorMessage += `Server responded with status: ${err.response.status}. `;
+        errorMessage += ` Server responded with status: ${err.response.status}.`;
         if (err.response.data && err.response.data.detail) {
-          errorMessage += err.response.data.detail;
+          errorMessage += ' ' + err.response.data.detail;
         }
       } else if (err.request) {
         // The request was made but no response was received
-        errorMessage += 'No response received from server. Please check your network connection or try again later.';
-      } else {
-        // Something else happened while setting up the request
-        errorMessage += err.message || 'Unknown error occurred.';
+        errorMessage += ' No response received from server. Please check your network connection or try again later.';
       }
       
       setError(errorMessage);
-      
-      // Set empty arrays to prevent null reference errors
-      setMappedCampaigns([]);
-      setUnmappedCampaigns([]);
     } finally {
       setLoading(false);
     }
@@ -274,7 +276,7 @@ function CampaignMapping() {
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
       
       // Filter unmapped campaigns by source if needed
-      const allUnmapped = unmappedResponse.data;
+      const allUnmapped = unmappedResponse.data.results;
       const filteredUnmapped = activeTab !== 0 
         ? allUnmapped.filter(c => c.source_system === DATA_SOURCES[activeTab - 1])
         : allUnmapped;

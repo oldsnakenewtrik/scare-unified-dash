@@ -94,30 +94,33 @@ function App() {
       console.log('Using date range:', params);
       const response = await corsProxy.get('/api/campaign-metrics', params);
       
+      // Ensure we have a valid response data array - consistent access pattern
+      const responseData = response?.data || [];
+      
       // Transform and store the data
-      console.log('Campaign data received:', response.data.length, 'records');
-      setCampaignData(response.data);
-      filterDataByTab(activeTab, response.data, showArchived);
+      console.log('Campaign data received:', responseData.length, 'records');
+      setCampaignData(responseData);
+      filterDataByTab(activeTab, responseData, showArchived);
     } catch (err) {
       console.error('Error fetching data:', err);
       
       // Provide more detailed error information
-      let errorMessage = 'Failed to fetch campaign data. ';
+      let errorMessage = 'Failed to fetch campaign data. This could be due to database migration issues. Please try again later.';
       
       if (err.code === 'ECONNABORTED') {
-        errorMessage += 'The request timed out. The server might be under heavy load or the dataset might be too large.';
+        errorMessage += ' The request timed out. The server might be under heavy load or the dataset might be too large.';
       } else if (err.response) {
         // The server responded with a status code outside the 2xx range
-        errorMessage += `Server responded with status: ${err.response.status}. `;
+        errorMessage += ` Server responded with status: ${err.response.status}.`;
         if (err.response.data && err.response.data.detail) {
-          errorMessage += err.response.data.detail;
+          errorMessage += ' ' + err.response.data.detail;
         }
       } else if (err.request) {
         // The request was made but no response was received
-        errorMessage += 'No response received from server. Please check your network connection or try again later.';
+        errorMessage += ' No response received from server. Please check your network connection or try again later.';
       } else {
         // Something else happened while setting up the request
-        errorMessage += err.message || 'Unknown error occurred.';
+        errorMessage += ' ' + (err.message || 'Unknown error occurred.');
       }
       
       setError(errorMessage);
