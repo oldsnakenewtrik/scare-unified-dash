@@ -3,26 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError, OperationalError
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-import os
-import sys
-import json
-import time
-import uuid
-import datetime
-import logging
-import traceback
-from typing import List, Dict, Any, Optional, Union
-from pathlib import Path
-from dotenv import load_dotenv
 from pydantic import BaseModel
-import asyncio
-import aiohttp
-from sqlalchemy import inspect
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
-# Import the database initialization module
+# Import the new db_dependency module
+from src.api.db_dependency import get_db, set_session_local
+
+# Importing DB utilities
 try:
     from .db_init import initialize_database, connect_with_retry, ensure_network_column_exists
 except ImportError:
@@ -1426,74 +1416,11 @@ try:
         logger.error(f"Failed to initialize database monitor: {str(e)}")
         logger.warning("Application will continue without database monitoring")
     
-    # Startup event to initialize database without blocking app startup
-    @app.on_event("startup")
-    async def startup_event():
-        """
-        Initialize database on startup without blocking the app from starting
-        """
-        logger.info("Application starting up...")
-        
-        # Run in a separate thread to avoid blocking the app startup
-        def init_db_async():
-            try:
-                # First, ensure the network column exists in the sm_fact_bing_ads table
-                # This is a critical fix that needs to run before other operations
-                logger.info("Checking for network column in sm_fact_bing_ads table...")
-                network_column_exists = ensure_network_column_exists()
-                if network_column_exists:
-                    logger.info("Network column check completed successfully")
-                else:
-                    logger.warning("Failed to ensure network column exists - application may encounter errors")
-                
-                # Then initialize the database normally
-                logger.info("Initializing database...")
-                engine, connection = initialize_database()
-                if engine and connection:
-                    logger.info("Database initialized successfully")
-                else:
-                    logger.error("Failed to initialize database")
-            except Exception as e:
-                logger.error(f"Error during database initialization: {e}")
-                logger.error(traceback.format_exc())
-        
-        # Start the initialization in a separate thread
-        import threading
-        db_thread = threading.Thread(target=init_db_async)
-        db_thread.daemon = True  # Allow the thread to exit when the main thread exits
-        db_thread.start()
-        logger.info("Database initialization started in background thread")
-    
-    # Add a global on_startup handler to verify DB connection when app starts
-    @app.on_event("startup")
-    def startup_db_client():
-        logger.info("FastAPI startup: Checking database connection")
-        try:
-            # Log the status
-            status = get_db_status()
-            if status["is_connected"]:
-                logger.info(f"Database connection successful at startup")
-            else:
-                logger.warning(f"Database not connected at startup: {status.get('last_error', 'Unknown error')}")
-                # Try to force a reconnect
-                reconnect_result = force_db_reconnect()
-                logger.info(f"Forced reconnection result: {reconnect_result}")
-        except Exception as e:
-            logger.error(f"Error during startup database check: {str(e)}")
-    
-    # Add a global on_shutdown handler to shutdown the DB connection when app stops
-    @app.on_event("shutdown")
-    def shutdown_db_client():
-        logger.info("FastAPI shutdown: Closing database connections")
-        try:
-            if engine:
-                engine.dispose()
-            logger.info("Database connections closed")
-        except Exception as e:
-            logger.error(f"Error closing database connections: {str(e)}")
-    
     # Set up the session factory
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    # Set the SessionLocal in our db_dependency module
+    set_session_local(SessionLocal)
     
     # Initialize database at startup
     try:
@@ -1506,55 +1433,71 @@ except Exception as e:
     # Note: We don't want to crash the server here, so we'll continue
     # The database connection will be retried in the connect_with_retry function
 
-# Dependency
-def get_db():
-    if SessionLocal is None:
-        # We hit this case when database connection could not be established initially
-        # Generate a unique error ID for tracking
-        error_id = str(uuid.uuid4())
-        logger.error(f"Database connection unavailable. Error ID: {error_id}")
-        # Try to reconnect to the database
-        try:
-            logger.info("Attempting to reconnect to database...")
-            force_db_reconnect()
-            # If successful, this should update the global SessionLocal
-        except Exception as reconnect_error:
-            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
-        
-        # Still raise an exception to inform the client
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database unavailable. Error ID: {error_id}"
-        )
+# Startup event to initialize database without blocking app startup
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initialize database on startup without blocking the app from starting
+    """
+    logger.info("Application starting up...")
     
-    db = None
-    try:
-        db = SessionLocal()
-        yield db
-    except OperationalError as e:
-        # Handle database connection errors
-        logger.error(f"Database session error: {str(e)}")
-        error_id = str(uuid.uuid4())
-        logger.error(f"Error ID: {error_id}")
-        
-        # Try to reconnect
+    # Run in a separate thread to avoid blocking the app startup
+    def init_db_async():
         try:
-            logger.info("Attempting to reconnect to database...")
-            force_db_reconnect()
-        except Exception as reconnect_error:
-            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
-        
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database connection error. Error ID: {error_id}"
-        )
+            # First, ensure the network column exists in the sm_fact_bing_ads table
+            # This is a critical fix that needs to run before other operations
+            logger.info("Checking for network column in sm_fact_bing_ads table...")
+            network_column_exists = ensure_network_column_exists()
+            if network_column_exists:
+                logger.info("Network column check completed successfully")
+            else:
+                logger.warning("Failed to ensure network column exists - application may encounter errors")
+            
+            # Then initialize the database normally
+            logger.info("Initializing database...")
+            engine, connection = initialize_database()
+            if engine and connection:
+                logger.info("Database initialized successfully")
+            else:
+                logger.error("Failed to initialize database")
+        except Exception as e:
+            logger.error(f"Error during database initialization: {e}")
+            logger.error(traceback.format_exc())
+    
+    # Start the initialization in a separate thread
+    import threading
+    db_thread = threading.Thread(target=init_db_async)
+    db_thread.daemon = True  # Allow the thread to exit when the main thread exits
+    db_thread.start()
+    logger.info("Database initialization started in background thread")
+    
+# Add a global on_startup handler to verify DB connection when app starts
+@app.on_event("startup")
+def startup_db_client():
+    logger.info("FastAPI startup: Checking database connection")
+    try:
+        # Log the status
+        status = get_db_status()
+        if status["is_connected"]:
+            logger.info(f"Database connection successful at startup")
+        else:
+            logger.warning(f"Database not connected at startup: {status.get('last_error', 'Unknown error')}")
+            # Try to force a reconnect
+            reconnect_result = force_db_reconnect()
+            logger.info(f"Forced reconnection result: {reconnect_result}")
     except Exception as e:
-        # Handle other database errors
-        logger.error(f"Database session exception: {str(e)}")
-        raise
-    finally:
-        if db:
-            db.close()
+        logger.error(f"Error during startup database check: {str(e)}")
+    
+# Add a global on_shutdown handler to shutdown the DB connection when app stops
+@app.on_event("shutdown")
+def shutdown_db_client():
+    logger.info("FastAPI shutdown: Closing database connections")
+    try:
+        if engine:
+            engine.dispose()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {str(e)}")
 
 # Health check endpoint for verifying server status
 @app.get("/health")
