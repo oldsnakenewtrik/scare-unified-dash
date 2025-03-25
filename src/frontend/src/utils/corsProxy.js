@@ -54,13 +54,15 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     
   try {
     console.log(`Making API call to ${url}`, { method, params });
+    
+    // Temporarily try without credentials to see if that resolves the CORS issue
     const response = await axios({
       method: method,
       url: url,
       params: params,
       data: data,
-      // Use credentials when making API calls
-      withCredentials: true,
+      // TEMPORARILY DISABLE CREDENTIALS to test if that's causing the CORS issue
+      withCredentials: false,
       // Add headers to help with CORS
       headers: {
         'Content-Type': 'application/json',

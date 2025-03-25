@@ -95,16 +95,29 @@ railway_frontend = "https://front-production-f6e6.up.railway.app"
 if railway_frontend not in cors_origins:
     cors_origins.append(railway_frontend)
 
+# Determine if we should allow credentials
+allow_credentials = os.environ.get("CORS_CREDENTIALS", "true").lower() == "true"
+
 # Log CORS settings for debugging
 print(f"CORS origins configured: {cors_origins}")
+print(f"CORS credentials allowed: {allow_credentials}")
+
+# Get allowed methods and headers from environment, or default to all
+cors_methods = os.environ.get("CORS_METHODS", "GET,POST,PUT,DELETE,OPTIONS").split(",")
+cors_headers = os.environ.get("CORS_HEADERS", "Content-Type,Authorization,Accept").split(",")
+
+print(f"CORS methods: {cors_methods}")
+print(f"CORS headers: {cors_headers}")
 
 # Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=allow_credentials,
+    allow_methods=cors_methods,
+    allow_headers=cors_headers,
+    expose_headers=["Content-Type", "X-Total-Count"],
+    max_age=600,  # 10 minutes cache for preflight requests
 )
 
 # Import and include the health check router
