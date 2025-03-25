@@ -828,7 +828,7 @@ def health_check(db=Depends(get_db)):
     return health_status
 
 # Simple health check endpoint that doesn't depend on database
-@app.get("/api/health")
+@app.get("/api/health", tags=["Health"])
 async def simple_health_check():
     """
     A simple health check endpoint that doesn't depend on the database.
@@ -1002,10 +1002,20 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
     Get hierarchical campaign data including metrics 
     """
     # Debug print to confirm this route is registered
-    print("DEBUG: campaigns-hierarchical route was imported and registered!")
+    logger.info("DEBUG: campaigns-hierarchical route was called!")
     
     try:
         logger.info("Fetching hierarchical campaign data")
+        
+        # Check if campaign_mappings table exists
+        try:
+            check_query = text("SELECT COUNT(*) FROM campaign_mappings LIMIT 1")
+            result = db.execute(check_query)
+            count = result.scalar()
+            logger.info(f"campaign_mappings table exists, found {count} records")
+        except Exception as e:
+            logger.error(f"Error checking campaign_mappings table: {str(e)}")
+            return {"error": f"Database error: campaign_mappings table may not exist. {str(e)}", "status": "error"}
         
         # Query campaign data
         query = text("""
@@ -1061,16 +1071,17 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             }
             campaigns.append(campaign)
         
+        logger.info(f"Returning {len(campaigns)} campaign records from hierarchical endpoint")
         return campaigns
         
     except SQLAlchemyError as e:
-        raise handle_db_error(e, "fetching hierarchical campaign data")
+        error_msg = f"Database error fetching hierarchical campaign data: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
-        logger.error(f"Error fetching hierarchical campaign data: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching hierarchical campaign data: {str(e)}"
-        )
+        error_msg = f"Error fetching hierarchical campaign data: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 @app.get("/api/campaigns-performance", tags=["Campaigns"])
 async def get_campaigns_performance(
@@ -1082,7 +1093,7 @@ async def get_campaigns_performance(
     Get campaign performance data for a specific date range
     """
     # Debug print to confirm this route is registered
-    print("DEBUG: campaigns-performance route was imported and registered!")
+    logger.info("DEBUG: campaigns-performance route was called!")
     
     try:
         logger.info(f"Fetching campaign performance data for {start_date} to {end_date}")
@@ -1129,13 +1140,13 @@ async def get_campaigns_performance(
         return campaigns
         
     except SQLAlchemyError as e:
-        raise handle_db_error(e, "fetching campaign performance data")
+        error_msg = f"Database error fetching campaign performance data: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
-        logger.error(f"Error fetching campaign performance data: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching campaign performance data: {str(e)}"
-        )
+        error_msg = f"Error fetching campaign performance data: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 @app.get("/api/campaign-metrics", tags=["Campaigns"])
 async def get_campaign_metrics(
@@ -1147,7 +1158,7 @@ async def get_campaign_metrics(
     Alias for campaigns-performance to match frontend API calls
     """
     # Debug print to confirm this route is registered
-    print("DEBUG: campaign-metrics route was imported and registered!")
+    logger.info("DEBUG: campaign-metrics route was called!")
     
     logger.info(f"campaign-metrics endpoint called, forwarding to campaigns-performance")
     # Reuse the campaigns-performance endpoint
@@ -1198,13 +1209,13 @@ async def get_campaign_mappings(db=Depends(get_db)):
         return mappings
         
     except SQLAlchemyError as e:
-        raise handle_db_error(e, "fetching campaign mappings")
+        error_msg = f"Database error fetching campaign mappings: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
-        logger.error(f"Error fetching campaign mappings: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching campaign mappings: {str(e)}"
-        )
+        error_msg = f"Error fetching campaign mappings: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 @app.post("/api/campaign-mappings", tags=["Campaigns"])
 async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get_db)):
@@ -1267,14 +1278,14 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
         
     except SQLAlchemyError as e:
         db.rollback()
-        raise handle_db_error(e, "creating campaign mapping")
+        error_msg = f"Database error creating campaign mapping: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
         db.rollback()
-        logger.error(f"Error creating campaign mapping: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error creating campaign mapping: {str(e)}"
-        )
+        error_msg = f"Error creating campaign mapping: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 @app.post("/api/campaign-order", tags=["Campaigns"])
 async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
@@ -1304,14 +1315,14 @@ async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(ge
         
     except SQLAlchemyError as e:
         db.rollback()
-        raise handle_db_error(e, "updating campaign display order")
+        error_msg = f"Database error updating campaign display order: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating campaign display order: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error updating campaign display order: {str(e)}"
-        )
+        error_msg = f"Error updating campaign display order: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 @app.post("/api/campaign-mappings/archive", tags=["Campaigns"])
 async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=Depends(get_db)):
@@ -1345,17 +1356,17 @@ async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=D
         
     except SQLAlchemyError as e:
         db.rollback()
-        raise handle_db_error(e, f"archiving campaign mapping with ID {mapping_id}")
+        error_msg = f"Database error archiving campaign mapping with ID {mapping_id}: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except HTTPException:
         db.rollback()
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error archiving campaign mapping: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error archiving campaign mapping: {str(e)}"
-        )
+        error_msg = f"Error archiving campaign mapping: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 # Add a test endpoint that doesn't require database access
 @app.get("/api/test", tags=["Test"])
@@ -1521,13 +1532,13 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
         logger.info(f"Returning a total of {len(unmapped_campaigns)} unmapped campaigns")
         return unmapped_campaigns
     except SQLAlchemyError as e:
-        raise handle_db_error(e, "fetching unmapped campaigns")
+        error_msg = f"Database error fetching unmapped campaigns: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
     except Exception as e:
-        logger.error(f"Error fetching unmapped campaigns: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching unmapped campaigns: {str(e)}"
-        )
+        error_msg = f"Error fetching unmapped campaigns: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg, "status": "error"}
 
 # Create a function to handle database errors consistently
 def handle_db_error(error: Exception, operation: str):
