@@ -25,12 +25,12 @@ const getApiBaseUrl = () => {
   if (window.location.hostname.includes('railway.app') || 
       window.location.hostname.includes('up.railway.app')) {
     
-    // Update to use the backend service URL with explicit API path
-    // This assumes the API is mounted at a subpath on the same service
-    const productionUrl = window.location.origin;
-    const backendUrl = `${productionUrl}/api`;
-    console.log('Detected Railway environment, using backend URL:', backendUrl);
-    return backendUrl;
+    // Railway deploys frontend and backend as separate services
+    // The backend service name is "back" according to railway.toml
+    // We need to use the Railway service URL pattern
+    const backServiceUrl = 'https://scare-unified-dash-back-production.up.railway.app';
+    console.log('Detected Railway environment, using back service URL:', backServiceUrl);
+    return backServiceUrl;
   }
   
   // For local development
