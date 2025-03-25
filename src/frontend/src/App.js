@@ -94,8 +94,14 @@ function App() {
       console.log('Using date range:', params);
       const response = await corsProxy.get('/api/campaign-metrics', params);
       
-      // Ensure we have a valid response data array - consistent access pattern
-      const responseData = response?.data || [];
+      // Add detailed logging to see the exact response shape
+      console.log('Raw campaign metrics response:', response);
+      
+      // Enhanced data access pattern to handle both direct arrays and nested .data.data structures
+      // If response.data is an array, use it directly. Otherwise, try response.data.data or default to empty array
+      const responseData = Array.isArray(response?.data) 
+        ? response.data 
+        : (Array.isArray(response?.data?.data) ? response.data.data : []);
       
       // Transform and store the data
       console.log('Campaign data received:', responseData.length, 'records');

@@ -129,12 +129,21 @@ function CampaignMapping() {
         // Continue processing but log the error
       }
       
-      // Ensure we have a valid response data array - consistent access pattern
-      const mappedData = mappedResponse?.data || [];
+      // Log response structure for debugging
+      console.log('Raw mapped campaigns response:', mappedResponse);
+      
+      // Ensure we have a valid response data array - Fix access pattern to handle direct array returns
+      // If response.data is an array, use it directly. Otherwise, try response.data.data or default to empty array
+      const mappedData = Array.isArray(mappedResponse?.data) 
+        ? mappedResponse.data 
+        : (mappedResponse?.data?.data || []);
       
       console.log(`Fetching unmapped campaigns...`);
       // Fetch all unmapped campaigns
       const unmappedResponse = await corsProxy.get('/api/unmapped-campaigns');
+      
+      // Add detailed logging to see the exact response shape
+      console.log('Raw unmapped campaigns response:', unmappedResponse);
       
       // Check if there was an error in the response
       if (unmappedResponse._error) {
@@ -142,15 +151,18 @@ function CampaignMapping() {
         // Continue processing but log the error
       }
       
-      // Ensure we have a valid response data array - consistent access pattern
-      const allUnmapped = unmappedResponse?.data || [];
+      // Ensure we have a valid response data array - Fix access pattern to handle direct array returns
+      // If response.data is an array, use it directly. Otherwise, try response.data.data or default to empty array
+      const allUnmapped = Array.isArray(unmappedResponse?.data) 
+        ? unmappedResponse.data 
+        : (unmappedResponse?.data?.data || []);
       
       // Filter unmapped campaigns by source if needed
       const filteredUnmapped = sourceSystem && allUnmapped.length > 0
         ? allUnmapped.filter(c => c && c.source_system === sourceSystem)
         : allUnmapped;
       
-      console.log(`Received ${mappedData.length} mapped campaigns and ${filteredUnmapped.length} unmapped campaigns`);
+      console.log(`Received ${mappedData?.length || 0} mapped campaigns and ${filteredUnmapped?.length || 0} unmapped campaigns`);
       
       // Store the data in state
       setMappedCampaigns(mappedData);

@@ -97,8 +97,11 @@ function UnifiedDashboard() {
       // Log the raw response for debugging
       console.log('Raw hierarchical response:', response);
       
-      // Ensure response.data exists and is an array (handle empty/null/non-array responses)
-      const responseData = Array.isArray(response?.data) ? response.data : [];
+      // Enhanced data access pattern to handle both direct arrays and nested .data.data structures
+      // If response.data is an array, use it directly. Otherwise, try response.data.data or default to empty array
+      const responseData = Array.isArray(response?.data) 
+        ? response.data 
+        : (Array.isArray(response?.data?.data) ? response.data.data : []);
       
       console.log('Campaign data processed to array:', responseData);
       
