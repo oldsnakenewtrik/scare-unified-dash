@@ -94,8 +94,13 @@ function UnifiedDashboard() {
       // For hierarchical view data
       const response = await corsProxy.get('/api/campaigns-hierarchical');
       
-      // Ensure response.data exists (handle empty/null responses)
-      const responseData = response?.data || [];
+      // Log the raw response for debugging
+      console.log('Raw hierarchical response:', response);
+      
+      // Ensure response.data exists and is an array (handle empty/null/non-array responses)
+      const responseData = Array.isArray(response?.data) ? response.data : [];
+      
+      console.log('Campaign data processed to array:', responseData);
       
       // Process the data into a hierarchical structure and filter by archive status
       const filteredData = responseData.filter(campaign => {
@@ -118,65 +123,39 @@ function UnifiedDashboard() {
         const formattedStartDate = startDate.toISOString().split('T')[0];
         const formattedEndDate = endDate.toISOString().split('T')[0];
         
-        // Get data for the specific date range
-        const dateRangeResponse = await corsProxy.get(`/api/campaigns-performance?start_date=${formattedStartDate}&end_date=${formattedEndDate}`);
-        
-        // Ensure dateRangeResponse.data exists
-        const dateRangeData = dateRangeResponse?.data || [];
-        
-        // Map the performance data to the hierarchical structure
-        const campaignPerformanceMap = new Map();
-        dateRangeData.forEach(item => {
-          if (item && item.campaign_id) {
-            campaignPerformanceMap.set(item.campaign_id, item);
-          }
-        });
-        
-        // Update metrics with date range data
-        dateFilteredData = filteredData.map(campaign => {
-          const performanceData = campaign.external_campaign_id ? 
-            campaignPerformanceMap.get(campaign.external_campaign_id) : null;
-          if (performanceData) {
-            return {
-              ...campaign,
-              impressions: performanceData.impressions,
-              clicks: performanceData.clicks,
-              conversions: performanceData.conversions,
-              cost: performanceData.cost
-            };
-          }
-          return campaign;
-        });
+        // Call metrics API with date filter
+        try {
+          const metricsResponse = await corsProxy.get('/api/campaign-metrics', {
+            start_date: formattedStartDate,
+            end_date: formattedEndDate
+          });
+          
+          // Log raw metrics response for debugging
+          console.log('Raw metrics response:', metricsResponse);
+          
+          // Ensure metrics data is an array
+          const metricsData = Array.isArray(metricsResponse?.data) ? metricsResponse.data : [];
+          
+          console.log('Metrics data processed to array:', metricsData);
+          
+          // Map metrics data to hierarchical data
+          dateFilteredData = filteredData.map(campaign => {
+            const metrics = metricsData.find(m => m.campaign_id === campaign.id) || {};
+            return { ...campaign, metrics };
+          });
+        } catch (metricsErr) {
+          console.error('Error fetching metrics for date range:', metricsErr);
+          // Continue with the hierarchical data without metrics
+        }
       }
       
       const organizedData = organizeHierarchicalData(dateFilteredData);
       setCampaignData(organizedData);
     } catch (err) {
       console.error('Error fetching campaign data:', err);
-      setError('Failed to fetch campaign data. This could be due to database migration issues. Try refreshing or contact support if the problem persists.');
-      
-      try {
-        // This is a temporary fallback to show something while migrations are being applied
-        const mappingsResponse = await corsProxy.get('/api/campaign-mappings');
-        
-        // Ensure mappingsResponse.data exists
-        const mappingsData = mappingsResponse?.data || [];
-        
-        // Only attempt to organize fallback data if we have actual mappings
-        if (mappingsData.length > 0) {
-          const fallbackData = organizeFallbackData(mappingsData);
-          setCampaignData(fallbackData);
-          setError('Using limited functionality mode while database updates are being applied.');
-        } else {
-          // If no mappings data, set empty data with a clear message
-          setCampaignData([]);
-          setError('No campaign data available. Database migrations may be in progress.');
-        }
-      } catch (fallbackErr) {
-        console.error('Fallback data fetch failed:', fallbackErr);
-        // Set empty data as last resort
-        setCampaignData([]);
-      }
+      setError(`Failed to fetch campaign data: ${err.message}`);
+      // Set empty array as fallback
+      setCampaignData([]);
     } finally {
       setLoading(false);
     }
