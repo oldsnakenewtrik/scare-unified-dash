@@ -85,17 +85,26 @@ app = FastAPI(
 # Debug print to verify app initialization
 print("DEBUG: FastAPI app initialized!")
 
-# CRITICAL FIX: Configure CORS with permissive settings
-logger.info("EXTREMELY CRITICAL CORS FIX: Configured to allow all origins")
+# Setup CORS middleware with explicit origins from environment variable
+# This allows us to set CORS in Railway variables instead of hardcoding
+cors_origins_str = os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5000")
+cors_origins = cors_origins_str.split(",")
 
-# Use FastAPI's built-in CORS middleware with correct settings
+# Add default frontend URL for Railway if not already in the list
+railway_frontend = "https://front-production-f6e6.up.railway.app"
+if railway_frontend not in cors_origins:
+    cors_origins.append(railway_frontend)
+
+# Log CORS settings for debugging
+print(f"CORS origins configured: {cors_origins}")
+
+# Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Must be False when using wildcard origins
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Type", "X-Process-Time"],
 )
 
 # Import and include the health check router

@@ -4,20 +4,40 @@
  */
 import axios from 'axios';
 
+// Allowed origins for credentials
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5000",
+  "https://front-production-f6e6.up.railway.app",
+  "https://scare-unified-dash-production.up.railway.app"
+];
+
 // Determine the API base URL based on the environment
 const getApiBaseUrl = () => {
-  // If we're in the Railway production environment
-  if (window.location.hostname.includes('railway.app')) {
-    // Use the same domain but with the backend service URL
-    return 'https://scare-unified-dash-production.up.railway.app';
+  // Get from environment variable first if available
+  const envUrl = process.env.REACT_APP_API_BASE_URL;
+  if (envUrl) {
+    console.log('Using API base URL from environment variable:', envUrl);
+    return envUrl;
   }
   
-  // For local development or other environments, use the environment variable or default
-  return process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
+  // For Railway production environment
+  if (window.location.hostname.includes('railway.app') || 
+      window.location.hostname.includes('up.railway.app')) {
+    
+    // Point directly to the BACK service URL from Railway dashboard
+    const backendUrl = 'https://scare-unified-dash-production.up.railway.app';
+    console.log('Detected Railway environment, using BACK service URL:', backendUrl);
+    return backendUrl;
+  }
+  
+  // For local development
+  console.log('Using local development API URL: http://localhost:5001');
+  return 'http://localhost:5001';
 };
 
 const API_BASE_URL = getApiBaseUrl();
-console.log('Using API base URL:', API_BASE_URL);
+console.log('Final API base URL:', API_BASE_URL);
 
 /**
  * Make a direct API request
@@ -33,14 +53,14 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     : `${API_BASE_URL}/${endpoint}`;
     
   try {
-    console.log(`Making direct API call to ${url}`);
+    console.log(`Making API call to ${url}`, { method, params });
     const response = await axios({
       method: method,
       url: url,
       params: params,
       data: data,
-      // Don't use withCredentials when using wildcard CORS
-      // withCredentials: true,
+      // Use credentials when making API calls
+      withCredentials: true,
       // Add headers to help with CORS
       headers: {
         'Content-Type': 'application/json',
@@ -49,10 +69,15 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       // Increase timeout for slow connections
       timeout: 60000
     });
-    console.log('Direct API call succeeded');
+    console.log('API call succeeded');
     
-    // Debug the actual response structure first
-    console.log('Raw API response structure:', JSON.stringify(response.data).substring(0, 200) + '...');
+    // Log the entire raw response to debug issues
+    console.log('Raw API response status:', response.status);
+    console.log('Raw API response data structure:', 
+      Array.isArray(response.data) 
+        ? `Array with ${response.data.length} items` 
+        : typeof response.data
+    );
     
     // Enhanced API response handling for critical endpoints
     if (endpoint.includes('/api/')) {
@@ -162,8 +187,21 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
             }
             
             if (!foundArray) {
-              // Unlike other endpoints, campaign mappings might be a list of key-value pairs
-              // If no array property is found but we have keys, return an empty array
+              // Check if the response itself can be treated as an array
+              const keys = Object.keys(response.data);
+              if (keys.length > 0 && response.data[keys[0]] && typeof response.data[keys[0]] === 'object') {
+                // Try to convert object of objects to array
+                const mappingsArray = keys.map(key => ({
+                  id: key,
+                  ...response.data[key]
+                }));
+                console.log(`Converted object to array with ${mappingsArray.length} items`);
+                response.data = mappingsArray;
+                foundArray = true;
+              }
+            }
+            
+            if (!foundArray) {
               console.warn('No campaign mappings array found, using empty array');
               response.data = [];
             }
@@ -184,6 +222,22 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
     return response;
   } catch (error) {
     console.error('API call failed:', error);
+    
+    // Enhanced error logging for debugging
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      console.error('Error response data:', error.response.data);
+      console.error('Error response status:', error.response.status);
+      console.error('Error response headers:', error.response.headers);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('Error request:', error.request);
+    } else {
+      // Something happened in setting up the request that triggered an Error
+      console.error('Error message:', error.message);
+    }
+    
     throw error;
   }
 };
