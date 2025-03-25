@@ -1358,22 +1358,111 @@ async def archive_campaign_mapping(mapping_id: int = Body(..., embed=True), db=D
         )
 
 # Add a test endpoint that doesn't require database access
-@app.get("/api/test")
+@app.get("/api/test", tags=["Test"])
 async def test_endpoint():
     """
     Simple test endpoint that doesn't require database access.
     Use this to verify the API is responding properly.
     """
     return {
-        "status": "ok",
-        "message": "API is working correctly",
-        "timestamp": datetime.datetime.now().isoformat(),
-        "environment": {
-            "cors_origins": cors_origins,
-            "api_host": os.environ.get("API_HOST", "Not set"),
-            "api_port": os.environ.get("API_PORT", "Not set"),
-        }
+        "status": "success",
+        "message": "API is working",
+        "timestamp": datetime.datetime.now().isoformat()
     }
+
+# Add unmapped campaigns endpoint to surface campaigns that need mapping
+@app.get("/api/unmapped-campaigns", tags=["Campaigns"])
+async def get_unmapped_campaigns(db=Depends(get_db)):
+    """
+    Get campaigns that don't have mappings yet so they can be mapped manually.
+    This endpoint is used by the mapping UI to surface new campaigns.
+    """
+    try:
+        logger.info("Fetching unmapped campaigns")
+        
+        # Query for unmapped campaigns from Google Ads first
+        google_query = text("""
+            WITH unique_campaigns AS (
+                SELECT DISTINCT
+                    campaign_id,
+                    campaign_name,
+                    network
+                FROM sm_fact_google_ads
+            )
+            SELECT DISTINCT
+                'Google Ads' as source_system,
+                uc.campaign_id as external_campaign_id,
+                uc.campaign_name as campaign_name,
+                uc.network as network
+            FROM unique_campaigns uc
+            LEFT JOIN campaign_mappings cm 
+                ON uc.campaign_id = cm.external_campaign_id 
+                AND cm.source_system = 'Google Ads'
+            WHERE cm.id IS NULL
+            ORDER BY uc.campaign_name
+            LIMIT 100
+        """)
+        
+        # Query for unmapped campaigns from Bing Ads
+        bing_query = text("""
+            WITH unique_campaigns AS (
+                SELECT DISTINCT
+                    campaign_id,
+                    campaign_name,
+                    network
+                FROM sm_fact_bing_ads
+            )
+            SELECT DISTINCT
+                'Bing Ads' as source_system,
+                uc.campaign_id as external_campaign_id,
+                uc.campaign_name as campaign_name,
+                uc.network as network
+            FROM unique_campaigns uc
+            LEFT JOIN campaign_mappings cm 
+                ON uc.campaign_id = cm.external_campaign_id 
+                AND cm.source_system = 'Bing Ads'
+            WHERE cm.id IS NULL
+            ORDER BY uc.campaign_name
+            LIMIT 100
+        """)
+        
+        # Execute both queries
+        google_results = db.execute(google_query)
+        bing_results = db.execute(bing_query)
+        
+        # Combine results
+        unmapped_campaigns = []
+        
+        for row in google_results:
+            campaign = {
+                "source_system": row.source_system,
+                "external_campaign_id": row.external_campaign_id,
+                "campaign_name": row.campaign_name,
+                "network": row.network
+            }
+            unmapped_campaigns.append(campaign)
+            
+        for row in bing_results:
+            campaign = {
+                "source_system": row.source_system,
+                "external_campaign_id": row.external_campaign_id,
+                "campaign_name": row.campaign_name,
+                "network": row.network
+            }
+            unmapped_campaigns.append(campaign)
+        
+        # Return combined result
+        logger.info(f"Found {len(unmapped_campaigns)} unmapped campaigns")
+        return unmapped_campaigns
+        
+    except SQLAlchemyError as e:
+        raise handle_db_error(e, "fetching unmapped campaigns")
+    except Exception as e:
+        logger.error(f"Error fetching unmapped campaigns: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching unmapped campaigns: {str(e)}"
+        )
 
 # Create a function to handle database errors consistently
 def handle_db_error(error: Exception, operation: str):
