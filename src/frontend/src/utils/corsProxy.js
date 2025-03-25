@@ -61,25 +61,32 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
       url: url,
       params: params,
       data: data,
-      // TEMPORARILY DISABLE CREDENTIALS to test if that's causing the CORS issue
-      withCredentials: false,
-      // Add headers to help with CORS
+      withCredentials: false, // Disabled for troubleshooting CORS
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      // Increase timeout for slow connections
-      timeout: 60000
     });
-    console.log('API call succeeded');
     
-    // Log the entire raw response to debug issues
-    console.log('Raw API response status:', response.status);
-    console.log('Raw API response data structure:', 
-      Array.isArray(response.data) 
-        ? `Array with ${response.data.length} items` 
-        : typeof response.data
-    );
+    // Check if the response contains an error object despite 200 status
+    if (response.data && response.data.error && response.data.status_code === 404) {
+      console.error(`API endpoint returned 404 inside 200 response: ${endpoint}`);
+      
+      // For campaign-mappings, return an empty array instead of throwing
+      if (endpoint.includes('campaign-mappings')) {
+        console.log('Returning empty array for campaign-mappings instead of error');
+        return [];
+      }
+      
+      // For campaign-metrics, return empty metrics data
+      if (endpoint.includes('campaign-metrics')) {
+        console.log('Returning empty metrics data instead of error');
+        return [];
+      }
+      
+      // For other endpoints, throw a more helpful error
+      throw new Error(`API endpoint not available: ${endpoint}`);
+    }
     
     // Enhanced API response handling for critical endpoints
     if (endpoint.includes('/api/')) {
@@ -221,23 +228,14 @@ export const fetchThroughProxy = async (method, endpoint, params = {}, data = nu
           : typeof response.data);
     }
     
-    return response;
+    return response.data;
   } catch (error) {
-    console.error('API call failed:', error);
+    console.error(`API call to ${url} failed:`, error.message);
     
-    // Enhanced error logging for debugging
-    if (error.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-      console.error('Error response data:', error.response.data);
-      console.error('Error response status:', error.response.status);
-      console.error('Error response headers:', error.response.headers);
-    } else if (error.request) {
-      // The request was made but no response was received
-      console.error('Error request:', error.request);
-    } else {
-      // Something happened in setting up the request that triggered an Error
-      console.error('Error message:', error.message);
+    // For campaign endpoints, return empty arrays instead of throwing
+    if (endpoint.includes('campaign')) {
+      console.log(`Returning empty array for ${endpoint} after error`);
+      return [];
     }
     
     throw error;
