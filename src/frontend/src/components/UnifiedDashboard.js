@@ -94,8 +94,11 @@ function UnifiedDashboard() {
       // For hierarchical view data
       const response = await corsProxy.get('/api/campaigns-hierarchical');
       
+      // Ensure response.data exists (handle empty/null responses)
+      const responseData = response?.data || [];
+      
       // Process the data into a hierarchical structure and filter by archive status
-      const filteredData = response.data.filter(campaign => {
+      const filteredData = responseData.filter(campaign => {
         // If showing archived, include all campaigns
         if (showArchived) return true;
         // Otherwise only include active campaigns (not archived)
@@ -118,15 +121,21 @@ function UnifiedDashboard() {
         // Get data for the specific date range
         const dateRangeResponse = await corsProxy.get(`/api/campaigns-performance?start_date=${formattedStartDate}&end_date=${formattedEndDate}`);
         
+        // Ensure dateRangeResponse.data exists
+        const dateRangeData = dateRangeResponse?.data || [];
+        
         // Map the performance data to the hierarchical structure
         const campaignPerformanceMap = new Map();
-        dateRangeResponse.data.forEach(item => {
-          campaignPerformanceMap.set(item.campaign_id, item);
+        dateRangeData.forEach(item => {
+          if (item && item.campaign_id) {
+            campaignPerformanceMap.set(item.campaign_id, item);
+          }
         });
         
         // Update metrics with date range data
         dateFilteredData = filteredData.map(campaign => {
-          const performanceData = campaignPerformanceMap.get(campaign.external_campaign_id);
+          const performanceData = campaign.external_campaign_id ? 
+            campaignPerformanceMap.get(campaign.external_campaign_id) : null;
           if (performanceData) {
             return {
               ...campaign,
@@ -149,11 +158,24 @@ function UnifiedDashboard() {
       try {
         // This is a temporary fallback to show something while migrations are being applied
         const mappingsResponse = await corsProxy.get('/api/campaign-mappings');
-        const fallbackData = organizeFallbackData(mappingsResponse.data);
-        setCampaignData(fallbackData);
-        setError('Using limited functionality mode while database updates are being applied.');
+        
+        // Ensure mappingsResponse.data exists
+        const mappingsData = mappingsResponse?.data || [];
+        
+        // Only attempt to organize fallback data if we have actual mappings
+        if (mappingsData.length > 0) {
+          const fallbackData = organizeFallbackData(mappingsData);
+          setCampaignData(fallbackData);
+          setError('Using limited functionality mode while database updates are being applied.');
+        } else {
+          // If no mappings data, set empty data with a clear message
+          setCampaignData([]);
+          setError('No campaign data available. Database migrations may be in progress.');
+        }
       } catch (fallbackErr) {
         console.error('Fallback data fetch failed:', fallbackErr);
+        // Set empty data as last resort
+        setCampaignData([]);
       }
     } finally {
       setLoading(false);
@@ -193,10 +215,24 @@ function UnifiedDashboard() {
 
   // Function to organize data into a hierarchical structure
   const organizeHierarchicalData = (data) => {
+    // Handle null/undefined input
+    if (!data || !Array.isArray(data)) {
+      console.warn('Invalid data received in organizeHierarchicalData:', data);
+      return [];
+    }
+    
+    // Return early if empty array
+    if (data.length === 0) {
+      return [];
+    }
+    
     // Group by source system
     const sourceGroups = {};
     
     data.forEach(item => {
+      // Skip invalid items
+      if (!item) return;
+      
       const source = item.source_system || 'Uncategorized';
       const network = item.network || 'Uncategorized';
       
@@ -231,10 +267,24 @@ function UnifiedDashboard() {
   
   // Function to organize fallback data when hierarchical endpoint fails
   const organizeFallbackData = (mappings) => {
+    // Handle null/undefined input
+    if (!mappings || !Array.isArray(mappings)) {
+      console.warn('Invalid mappings data received in organizeFallbackData:', mappings);
+      return [];
+    }
+    
+    // Return early if empty array
+    if (mappings.length === 0) {
+      return [];
+    }
+    
     // Group by source system (simplified version for fallback)
     const sourceGroups = {};
     
     mappings.forEach(item => {
+      // Skip invalid items
+      if (!item) return;
+      
       const source = item.source_system || 'Uncategorized';
       const network = item.network || 'Uncategorized';
       
@@ -258,7 +308,7 @@ function UnifiedDashboard() {
         external_campaign_id: item.external_campaign_id,
         original_campaign_name: item.original_campaign_name,
         pretty_campaign_name: item.pretty_campaign_name,
-        display_order: 0,
+        display_order: item.display_order || 0,
         is_active: item.is_active !== false,
         impressions: 0,
         clicks: 0,
