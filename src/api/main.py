@@ -1380,7 +1380,37 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
     try:
         logger.info("Fetching unmapped campaigns")
         
-        # Query for unmapped campaigns from Google Ads first
+        # First check if Google Ads data exists
+        check_google_data = text("SELECT COUNT(*) FROM sm_fact_google_ads")
+        google_count = db.execute(check_google_data).scalar()
+        logger.info(f"Total records in sm_fact_google_ads: {google_count}")
+        
+        # Log a sample of Google Ads data to verify what's available
+        if google_count > 0:
+            sample_query = text("SELECT campaign_id, campaign_name, network FROM sm_fact_google_ads LIMIT 3")
+            sample_rows = db.execute(sample_query).fetchall()
+            for row in sample_rows:
+                logger.info(f"Sample Google Ads row: {row}")
+        
+        # Check campaign_mappings table
+        check_mappings = text("SELECT COUNT(*) FROM campaign_mappings")
+        mappings_count = db.execute(check_mappings).scalar()
+        logger.info(f"Total records in campaign_mappings: {mappings_count}")
+        
+        # Check if the unique campaigns query works as expected
+        test_unique = text("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT
+                    campaign_id,
+                    campaign_name,
+                    network
+                FROM sm_fact_google_ads
+            ) AS unique_count
+        """)
+        unique_count = db.execute(test_unique).scalar()
+        logger.info(f"Total unique campaigns in Google Ads: {unique_count}")
+        
+        # Now proceed with the original query for unmapped campaigns from Google Ads
         google_query = text("""
             WITH unique_campaigns AS (
                 SELECT DISTINCT
@@ -1403,6 +1433,39 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
             LIMIT 100
         """)
         
+        # Log that we're about to execute the Google Ads query
+        logger.info("Executing Google Ads query for unmapped campaigns")
+        
+        # Execute query with full error catching
+        try:
+            google_results = db.execute(google_query)
+            
+            # Log Google query results
+            google_list = []
+            for row in google_results:
+                campaign = {
+                    "source_system": row.source_system,
+                    "external_campaign_id": row.external_campaign_id,
+                    "campaign_name": row.campaign_name,
+                    "network": row.network
+                }
+                google_list.append(campaign)
+                
+            logger.info(f"Found {len(google_list)} unmapped Google Ads campaigns")
+            if google_list:
+                logger.info(f"First unmapped campaign: {google_list[0]}")
+        except Exception as query_error:
+            logger.error(f"Error executing Google Ads query: {str(query_error)}")
+            # Log the exception details
+            import traceback
+            logger.error(traceback.format_exc())
+            google_list = []
+        
+        # Similar debugging for Bing Ads
+        check_bing_data = text("SELECT COUNT(*) FROM sm_fact_bing_ads")
+        bing_count = db.execute(check_bing_data).scalar()
+        logger.info(f"Total records in sm_fact_bing_ads: {bing_count}")
+            
         # Query for unmapped campaigns from Bing Ads
         bing_query = text("""
             WITH unique_campaigns AS (
@@ -1426,35 +1489,37 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
             LIMIT 100
         """)
         
-        # Execute both queries
-        google_results = db.execute(google_query)
-        bing_results = db.execute(bing_query)
+        # Log that we're about to execute the Bing Ads query
+        logger.info("Executing Bing Ads query for unmapped campaigns")
+        
+        try:
+            bing_results = db.execute(bing_query)
+            
+            # Log Bing query results
+            bing_list = []
+            for row in bing_results:
+                campaign = {
+                    "source_system": row.source_system,
+                    "external_campaign_id": row.external_campaign_id,
+                    "campaign_name": row.campaign_name,
+                    "network": row.network
+                }
+                bing_list.append(campaign)
+                
+            logger.info(f"Found {len(bing_list)} unmapped Bing Ads campaigns")
+        except Exception as query_error:
+            logger.error(f"Error executing Bing Ads query: {str(query_error)}")
+            # Log the exception details
+            import traceback
+            logger.error(traceback.format_exc())
+            bing_list = []
         
         # Combine results
-        unmapped_campaigns = []
-        
-        for row in google_results:
-            campaign = {
-                "source_system": row.source_system,
-                "external_campaign_id": row.external_campaign_id,
-                "campaign_name": row.campaign_name,
-                "network": row.network
-            }
-            unmapped_campaigns.append(campaign)
-            
-        for row in bing_results:
-            campaign = {
-                "source_system": row.source_system,
-                "external_campaign_id": row.external_campaign_id,
-                "campaign_name": row.campaign_name,
-                "network": row.network
-            }
-            unmapped_campaigns.append(campaign)
+        unmapped_campaigns = google_list + bing_list
         
         # Return combined result
-        logger.info(f"Found {len(unmapped_campaigns)} unmapped campaigns")
+        logger.info(f"Returning a total of {len(unmapped_campaigns)} unmapped campaigns")
         return unmapped_campaigns
-        
     except SQLAlchemyError as e:
         raise handle_db_error(e, "fetching unmapped campaigns")
     except Exception as e:
