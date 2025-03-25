@@ -10,10 +10,11 @@ const getWebSocketUrl = () => {
   // If we're in the production environment
   if (process.env.NODE_ENV === 'production') {
     // Use the backend service URL with the WebSocket protocol
-    // CRITICAL: Don't include port (8000) in production URLs for Railway
-    // Railway only allows connections through standard ports (80/443)
-    const hostname = window.location.hostname || 'scare-unified-dash-production.up.railway.app';
-    return `${protocol}//${hostname}/ws`;
+    // CRITICAL: Don't include port in production URLs for Railway
+    // Use the REACT_APP_API_BASE_URL environment variable for the backend URL
+    const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'https://scare-unified-dash-production.up.railway.app';
+    const apiUrl = new URL(apiBaseUrl);
+    return `${protocol}//${apiUrl.hostname}/ws`;
   }
   
   // For local development

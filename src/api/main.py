@@ -85,28 +85,54 @@ app = FastAPI(
 # Debug print to verify app initialization
 print("DEBUG: FastAPI app initialized!")
 
-# CORS middleware setup
+# Add CORS middleware - use environment variables for configuration
+allowed_origins = os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+allowed_origins = [origin.strip() for origin in allowed_origins.split(",")]
+
+# Log the CORS origins for debugging
+logger.info(f"CORS allowed origins: {allowed_origins}")
+
+# Add the frontend domain if it's not already in the list
+frontend_domain = "https://front-production-f6e6.up.railway.app"
+if frontend_domain not in allowed_origins:
+    allowed_origins.append(frontend_domain)
+    logger.info(f"Added frontend domain to CORS allowed origins: {frontend_domain}")
+
+allow_credentials = os.environ.get("CORS_CREDENTIALS", "true").lower() == "true"
+allowed_methods = os.environ.get("CORS_METHODS", "GET,POST,PUT,DELETE,OPTIONS").split(",")
+allowed_headers = os.environ.get("CORS_HEADERS", "Content-Type,Authorization,Accept").split(",")
+
+logger.info(f"CORS Configuration: origins={allowed_origins}, credentials={allow_credentials}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://front-production-f6e6.up.railway.app",
-        "https://scare-unified-dash-production.up.railway.app",
-        "*"  # Temporarily allow all origins for testing
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=allowed_methods,
+    allow_headers=allowed_headers,
 )
 
-# Import and include the health check router
-try:
-    from .health_check import router as health_check_router
-    app.include_router(health_check_router)
-    print("DEBUG: Health check routes registered successfully")
-except Exception as e:
-    logger.error(f"Failed to import health check router: {str(e)}")
-    print(f"DEBUG ERROR: Failed to import health check router: {str(e)}")
+# Add a custom middleware to add CORS headers to 404 responses
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    """Add CORS headers to all responses, including error responses"""
+    try:
+        # Process the request
+        response = await call_next(request)
+        
+        # Add CORS headers to all responses, including error responses
+        origin = request.headers.get("origin")
+        if origin and (origin in allowed_origins or "*" in allowed_origins):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true" if allow_credentials else "false"
+            response.headers["Access-Control-Allow-Methods"] = ", ".join(allowed_methods)
+            response.headers["Access-Control-Allow-Headers"] = ", ".join(allowed_headers)
+        
+        return response
+    except Exception as e:
+        logger.error(f"Error in CORS middleware: {str(e)}")
+        # Re-raise the exception to be handled by FastAPI
+        raise
 
 # Add middleware to log all requests and add CORS headers
 @app.middleware("http")
@@ -263,355 +289,6 @@ except ImportError as e:
         print("Simplified WebSocket support added successfully")
     except Exception as e:
         print(f"Failed to add simplified WebSocket support: {e}")
-
-import os
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-# Set up paths
-frontend_build_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                                  "src", "frontend", "build")
-
-# Check if the frontend build directory exists
-if os.path.exists(frontend_build_path):
-    logger.info(f"Mounting frontend build directory: {frontend_build_path}")
-    
-    # Create a custom StaticFiles instance for serving the index.html file
-    # for any routes that would otherwise 404 (for client-side routing)
-    class SPAStaticFiles(StaticFiles):
-        async def get_response(self, request, path):
-            logger.debug(f"Static files request for path: {path}")
-            try:
-                # Try to serve the path as requested
-                return await super().get_response(request, path)
-            except HTTPException as e:
-                # If path not found and status is 404, serve index.html
-                if e.status_code == 404:
-                    logger.debug(f"Path {path} not found, serving index.html")
-                    index_path = os.path.join(frontend_build_path, "index.html")
-                    if os.path.exists(index_path):
-                        return FileResponse(index_path)
-                # Re-raise the exception if not a 404 or index.html doesn't exist
-                raise e
-    
-    # Mount the static files directory first, with specific path priority
-    # API endpoints get priority over static files with the same path
-    app.mount("/static", StaticFiles(directory=os.path.join(frontend_build_path, "static")), name="static")
-    app.mount("/", SPAStaticFiles(directory=frontend_build_path, html=True), name="frontend")
-    
-    logger.info("Frontend build directory mounted successfully")
-else:
-    logger.warning(f"Frontend build directory not found at {frontend_build_path}. Frontend will not be served.")
-
-# Database connection
-DATABASE_URL = get_database_url()
-
-# Global variable to track if DB monitor was initialized
-db_monitor_initialized = False
-
-try:
-    # Use the new retry mechanism for establishing the database connection
-    logger.info("Attempting to connect to database with retry mechanism")
-    engine = connect_with_retry(max_retries=5, delay=5)
-    
-    # Initialize the database monitor
-    try:
-        db_monitor = initialize_monitor(
-            database_url=DATABASE_URL,
-            check_interval=60,  # Check every minute in production
-            pool_recycle=300    # Recycle connections every 5 minutes
-        )
-        db_monitor_initialized = True
-        logger.info("Database monitoring initialized and started")
-    except Exception as e:
-        logger.error(f"Failed to initialize database monitor: {str(e)}")
-        logger.warning("Application will continue without database monitoring")
-    
-    # Startup event to initialize database without blocking app startup
-    @app.on_event("startup")
-    async def startup_event():
-        """
-        Initialize database on startup without blocking the app from starting
-        """
-        logger.info("Application starting up...")
-        
-        # Run in a separate thread to avoid blocking the app startup
-        def init_db_async():
-            try:
-                # First, ensure the network column exists in the sm_fact_bing_ads table
-                # This is a critical fix that needs to run before other operations
-                logger.info("Checking for network column in sm_fact_bing_ads table...")
-                network_column_exists = ensure_network_column_exists()
-                if network_column_exists:
-                    logger.info("Network column check completed successfully")
-                else:
-                    logger.warning("Failed to ensure network column exists - application may encounter errors")
-                
-                # Then initialize the database normally
-                logger.info("Initializing database...")
-                engine, connection = initialize_database()
-                if engine and connection:
-                    logger.info("Database initialized successfully")
-                else:
-                    logger.error("Failed to initialize database")
-            except Exception as e:
-                logger.error(f"Error during database initialization: {e}")
-                logger.error(traceback.format_exc())
-        
-        # Start the initialization in a separate thread
-        import threading
-        db_thread = threading.Thread(target=init_db_async)
-        db_thread.daemon = True  # Allow the thread to exit when the main thread exits
-        db_thread.start()
-        logger.info("Database initialization started in background thread")
-    
-    # Add a global on_startup handler to verify DB connection when app starts
-    @app.on_event("startup")
-    def startup_db_client():
-        logger.info("FastAPI startup: Checking database connection")
-        try:
-            # Log the status
-            status = get_db_status()
-            if status["is_connected"]:
-                logger.info(f"Database connection successful at startup")
-            else:
-                logger.warning(f"Database not connected at startup: {status.get('last_error', 'Unknown error')}")
-                # Try to force a reconnect
-                reconnect_result = force_db_reconnect()
-                logger.info(f"Forced reconnection result: {reconnect_result}")
-        except Exception as e:
-            logger.error(f"Error during startup database check: {str(e)}")
-    
-    # Add a global on_shutdown handler to shutdown the DB connection when app stops
-    @app.on_event("shutdown")
-    def shutdown_db_client():
-        logger.info("FastAPI shutdown: Closing database connections")
-        try:
-            if engine:
-                engine.dispose()
-            logger.info("Database connections closed")
-        except Exception as e:
-            logger.error(f"Error closing database connections: {str(e)}")
-    
-    # Set up the session factory
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
-    # Initialize database at startup
-    try:
-        initialize_database()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
-except Exception as e:
-    logger.critical(f"Failed to connect to database: {str(e)}")
-    # Note: We don't want to crash the server here, so we'll continue
-    # The database connection will be retried in the connect_with_retry function
-
-# Dependency
-def get_db():
-    if SessionLocal is None:
-        # We hit this case when database connection could not be established initially
-        # Generate a unique error ID for tracking
-        error_id = str(uuid.uuid4())
-        logger.error(f"Database connection unavailable. Error ID: {error_id}")
-        # Try to reconnect to the database
-        try:
-            logger.info("Attempting to reconnect to database...")
-            force_db_reconnect()
-            # If successful, this should update the global SessionLocal
-        except Exception as reconnect_error:
-            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
-        
-        # Still raise an exception to inform the client
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database unavailable. Error ID: {error_id}"
-        )
-    
-    db = None
-    try:
-        db = SessionLocal()
-        yield db
-    except OperationalError as e:
-        # Handle database connection errors
-        logger.error(f"Database session error: {str(e)}")
-        error_id = str(uuid.uuid4())
-        logger.error(f"Error ID: {error_id}")
-        
-        # Try to reconnect
-        try:
-            logger.info("Attempting to reconnect to database...")
-            force_db_reconnect()
-        except Exception as reconnect_error:
-            logger.error(f"Failed to reconnect: {str(reconnect_error)}")
-        
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database connection error. Error ID: {error_id}"
-        )
-    except Exception as e:
-        # Handle other database errors
-        logger.error(f"Database session exception: {str(e)}")
-        raise
-    finally:
-        if db:
-            db.close()
-
-# Add error handling middleware
-@app.middleware("http")
-async def db_error_handler(request, call_next):
-    """Middleware to handle database errors globally"""
-    try:
-        # Check for certain endpoints that should skip this middleware
-        skip_db_error_check = any([
-            request.url.path.endswith("/api/db-test"),
-            request.url.path.endswith("/api/db-status"),
-            request.url.path.endswith("/api/db-reconnect"),
-            request.url.path.endswith("/health"),
-            request.url.path.endswith("/api/health"),
-            request.url.path.endswith("/api/cors-test")  
-        ])
-        
-        if skip_db_error_check:
-            # Skip DB checking for diagnostics endpoints
-            return await call_next(request)
-        
-        # Check if database monitor is initialized
-        if not db_monitor_initialized:
-            # If monitor isn't initialized, allow the request to proceed
-            # but log a warning for non-diagnostic endpoints
-            logger.warning(f"Database monitor not initialized for request to {request.url.path}")
-            return await call_next(request)
-            
-        # Check if database is connected
-        db_status = get_db_status()
-        if not db_status.get("is_connected", False):
-            # Database is not connected, try to reconnect
-            logger.warning(f"Database connection lost before request to {request.url.path}. Attempting reconnect.")
-            reconnect_success = force_db_reconnect()
-            
-            if not reconnect_success:
-                # If reconnection failed, return a service unavailable response
-                error_id = str(uuid.uuid4())
-                logger.error(f"Database reconnection failed for request to {request.url.path}. Error ID: {error_id}")
-                
-                return JSONResponse(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    content={
-                        "status": "error",
-                        "message": "Database connection is unavailable. Please try again later.",
-                        "error_id": error_id,
-                        "error_code": "DATABASE_UNAVAILABLE"
-                    }
-                )
-        
-        # Continue with the request if database is connected
-        return await call_next(request)
-    except Exception as e:
-        # Log the error
-        error_id = str(uuid.uuid4())
-        logger.error(f"Error in database middleware: {str(e)}. Error ID: {error_id}")
-        
-        # Return a generic error response
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "status": "error",
-                "message": "Internal server error occurred while processing the request.",
-                "error_id": error_id,
-                "error_code": "INTERNAL_SERVER_ERROR"
-            }
-        )
-
-# Pydantic models for API response
-class MetricsSummary(BaseModel):
-    date: datetime.date
-    total_clicks: int
-    total_impressions: int
-    total_cost: float
-    total_conversions: float
-    total_revenue: float
-    website_visitors: int
-    salesforce_leads: int
-    opportunities: int
-    closed_won: int
-
-class DateRangeParams(BaseModel):
-    start_date: datetime.date
-    end_date: datetime.date
-    campaign_name: Optional[str] = None
-    source_system: Optional[str] = None
-
-class CampaignMetrics(BaseModel):
-    campaign_id: int
-    campaign_name: str
-    source_system: str
-    is_active: bool
-    date: datetime.date
-    impressions: int
-    clicks: int
-    spend: float
-    revenue: float
-    conversions: float
-    cpc: float
-    smooth_leads: int
-    total_sales: int
-    users: int
-
-class CampaignMappingCreate(BaseModel):
-    source_system: str
-    external_campaign_id: str
-    original_campaign_name: str
-    pretty_campaign_name: str
-    campaign_category: Optional[str] = None
-    campaign_type: Optional[str] = None
-    network: Optional[str] = None
-    pretty_network: Optional[str] = None
-    pretty_source: Optional[str] = None
-    display_order: Optional[int] = None
-
-class CampaignMapping(CampaignMappingCreate):
-    id: int
-    is_active: bool
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-class CampaignSource(BaseModel):
-    source_system: str
-    external_campaign_id: str
-    original_campaign_name: str
-    network: Optional[str] = None
-
-class CampaignOrderUpdate(BaseModel):
-    id: int
-    display_order: int
-
-class MetricsSummaryHierarchical(BaseModel):
-    impressions: Optional[int] = None
-    clicks: Optional[int] = None
-    conversions: Optional[float] = None
-    cost: Optional[float] = None
-
-class CampaignHierarchical(BaseModel):
-    id: int
-    source_system: str
-    external_campaign_id: str
-    original_campaign_name: str
-    pretty_campaign_name: str
-    campaign_category: Optional[str] = None
-    campaign_type: Optional[str] = None
-    network: Optional[str] = None
-    display_order: int
-    impressions: Optional[int] = None
-    clicks: Optional[int] = None
-    conversions: Optional[float] = None
-    cost: Optional[float] = None
-
-class UnmappedCampaign(BaseModel):
-    source_system: str
-    external_campaign_id: str
-    campaign_name: str
-    network: Optional[str] = None
 
 # Health check endpoint for verifying server status
 @app.get("/health")
@@ -1842,3 +1519,50 @@ async def root_health_check():
         "status": "healthy",
         "timestamp": datetime.datetime.now().isoformat()
     }
+
+def mount_static_files():
+    """Mount static files after all API routes are registered"""
+    frontend_build_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                      "src", "frontend", "build")
+    
+    # Check if the frontend build directory exists
+    if os.path.exists(frontend_build_path):
+        logger.info(f"Mounting frontend build directory: {frontend_build_path}")
+        
+        # Create a custom StaticFiles instance for serving the index.html file
+        # for any routes that would otherwise 404 (for client-side routing)
+        class SPAStaticFiles(StaticFiles):
+            async def get_response(self, request, path):
+                # Skip API routes completely - don't try to serve them as static files
+                if path.startswith("api/") or path.startswith("/api/"):
+                    logger.debug(f"API path detected: {path}, letting it pass through to FastAPI routes")
+                    # Don't handle API routes in the static file handler
+                    # FastAPI will handle them properly
+                    raise HTTPException(status_code=404)
+                    
+                logger.debug(f"Static files request for path: {path}")
+                try:
+                    # Try to serve the path as requested
+                    return await super().get_response(request, path)
+                except HTTPException as e:
+                    # If path not found and status is 404, serve index.html
+                    if e.status_code == 404:
+                        logger.debug(f"Path {path} not found, serving index.html")
+                        index_path = os.path.join(frontend_build_path, "index.html")
+                        if os.path.exists(index_path):
+                            return FileResponse(index_path)
+                    # Re-raise the exception if not a 404 or index.html doesn't exist
+                    raise e
+        
+        # Mount the static files directory for /static path
+        app.mount("/static", StaticFiles(directory=os.path.join(frontend_build_path, "static")), name="static")
+        
+        # Mount the frontend build directory LAST, after all API routes are defined
+        # This ensures API endpoints take precedence
+        app.mount("/", SPAStaticFiles(directory=frontend_build_path, html=True), name="frontend")
+        
+        logger.info("Frontend build directory mounted successfully")
+    else:
+        logger.warning(f"Frontend build directory not found at {frontend_build_path}. Frontend will not be served.")
+
+mount_static_files()
