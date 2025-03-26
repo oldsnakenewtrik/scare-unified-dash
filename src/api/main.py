@@ -853,8 +853,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
             "campaign_category": mapping.campaign_category,
             "campaign_type": mapping.campaign_type,
             "network": mapping.network,
-            "pretty_network": mapping.pretty_network, # Restored
-            "pretty_source": mapping.pretty_source,   # Restored
+            "pretty_network": mapping.pretty_network,
+            "pretty_source": mapping.pretty_source,
             "display_order": mapping.display_order or 999 # Default display_order
         }
 
