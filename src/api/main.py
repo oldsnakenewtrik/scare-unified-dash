@@ -528,15 +528,8 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 COALESCE(SUM(perf.cost), 0) AS cost
             FROM public.sm_campaign_name_mapping m -- Start with mapping table
             LEFT JOIN public.sm_campaign_performance perf -- LEFT JOIN to performance view
-                ON LOWER(m.source_system) = LOWER(perf.platform) -- Match platform first
-                AND CASE -- Use conditional join based on source system
-                        WHEN LOWER(m.source_system) IN ('google ads', 'bing ads') THEN
-                            -- Compare numerically for known numeric ID systems
-                            NULLIF(TRIM(m.external_campaign_id), '')::BIGINT = perf.campaign_id
-                        ELSE
-                            -- Compare as text for other systems
-                            TRIM(m.external_campaign_id) = TRIM(perf.campaign_id::VARCHAR)
-                    END
+                ON TRIM(m.external_campaign_id) = TRIM(perf.campaign_id::VARCHAR) -- Reverted to TRIM + VARCHAR cast
+                AND LOWER(m.source_system) = LOWER(perf.platform)
             WHERE m.is_active = TRUE
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
@@ -605,17 +598,17 @@ async def get_campaigns_performance(
         
         # Query campaign performance data
         query = text("""
-            SELECT 
-                cf.campaign_id,
-                cf.campaign_name,
-                cf.source_system,
-                cf.date,
-                cf.impressions,
-                cf.clicks,
-                cf.spend,
-                cf.revenue,
-                cf.conversions,
-                CASE WHEN clicks > 0 THEN cost / clicks ELSE 0 END AS cpc -- Use columns from view
+            SELECT
+                uam.campaign_id,      -- Use uam alias
+                uam.campaign_name,    -- Use uam alias
+                uam.platform AS source_system, -- Use uam alias (platform is the correct name in view)
+                uam.date,             -- Use uam alias
+                uam.impressions,      -- Use uam alias
+                uam.clicks,           -- Use uam alias
+                uam.cost AS spend,    -- Use uam alias (cost is the name in view)
+                0 AS revenue,         -- Placeholder for revenue if not in view
+                uam.conversions,      -- Use uam alias
+                CASE WHEN uam.clicks > 0 THEN uam.cost / uam.clicks ELSE 0 END AS cpc -- Use uam alias
             FROM public.sm_unified_ads_metrics uam -- Use the unified view
             WHERE uam.date BETWEEN :start_date AND :end_date
             ORDER BY uam.date DESC, uam.campaign_name -- Use view columns for ordering
