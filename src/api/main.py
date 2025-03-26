@@ -37,6 +37,7 @@ import traceback
 import json
 import sys
 import time
+import re # Import regex module
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 from dotenv import load_dotenv
@@ -519,11 +520,13 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
         map_result = db.execute(map_query)
         # Convert mappings to a list of dicts, preparing keys for join
         mappings_list = []
+        import re # Make sure re is imported at the top of the file
+
         for row in map_result:
             mapping_dict = dict(row._mapping)
-            # Explicitly create comparable key in Python: lower_source_system|trimmed_external_id
-            src_sys = str(mapping_dict.get('source_system','')).strip().lower()
-            ext_id = str(mapping_dict.get('external_campaign_id','')).strip()
+            # Aggressively clean and create comparable key in Python
+            src_sys = re.sub(r'[^a-z0-9\s]+', '', str(mapping_dict.get('source_system','')).strip().lower())
+            ext_id = re.sub(r'\D+', '', str(mapping_dict.get('external_campaign_id','')).strip()) # Keep only digits
             mapping_dict['_join_key'] = f"{src_sys}|{ext_id}"
             mappings_list.append(mapping_dict)
         logger.info(f"DEBUG JOIN: Found {len(mappings_list)} active mappings.")
@@ -546,9 +549,9 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
         # Convert performance data to a dict keyed by lower_platform|trimmed_campaign_id
         perf_dict = {}
         for row in perf_result:
-            # Explicitly create comparable key in Python: lower_platform|trimmed_campaign_id
-            perf_platform = str(row.lower_platform).strip().lower() # Already lower from SQL, but be safe
-            perf_id = str(row.trimmed_campaign_id).strip() # Already trimmed from SQL, but be safe
+            # Aggressively clean and create comparable key in Python
+            perf_platform = re.sub(r'[^a-z0-9\s]+', '', str(row.lower_platform).strip().lower())
+            perf_id = re.sub(r'\D+', '', str(row.trimmed_campaign_id).strip()) # Keep only digits
             perf_key = f"{perf_platform}|{perf_id}"
             perf_dict[perf_key] = dict(row._mapping)
         logger.info(f"DEBUG JOIN: Found {len(perf_dict)} aggregated performance records.")
