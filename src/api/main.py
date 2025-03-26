@@ -858,7 +858,7 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
         
         # Insert the new mapping
         query = text("""
-            INSERT INTO campaign_mappings (
+            INSERT INTO public.sm_campaign_name_mapping (
                 source_system,
                 external_campaign_id,
                 original_campaign_name,

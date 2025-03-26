@@ -26,10 +26,26 @@ const getApiBaseUrl = () => {
       window.location.hostname.includes('up.railway.app')) {
     
     // Railway deploys frontend and backend as separate services
-    // The backend service name is "back" according to railway.toml
-    // We need to use the Railway service URL pattern
-    const backServiceUrl = 'https://scare-unified-dash-back-production.up.railway.app';
-    console.log('Detected Railway environment, using back service URL:', backServiceUrl);
+    // The backend service might have a different URL pattern than we assumed
+    // If front service is at front-production-f6e6.up.railway.app
+    // Then back service is likely at back-production-[hash].up.railway.app
+    
+    // Try to extract environment from frontend URL
+    const hostname = window.location.hostname;
+    const isFrontService = hostname.startsWith('front-');
+    
+    let backServiceUrl;
+    if (isFrontService) {
+      // If frontend URL starts with 'front-', replace with 'back-'
+      backServiceUrl = `https://${hostname.replace('front-', 'back-')}`;
+      console.log('Detected Railway front service, using derived back service URL:', backServiceUrl);
+    } else {
+      // If in production but not specifically on front service,
+      // try accessing API on same domain
+      backServiceUrl = window.location.origin;
+      console.log('Using same origin for API:', backServiceUrl);
+    }
+    
     return backServiceUrl;
   }
   

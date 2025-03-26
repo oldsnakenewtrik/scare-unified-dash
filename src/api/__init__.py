@@ -1,4 +1,1 @@
-"""
-SCARE Unified Dashboard API Package
-This package contains the FastAPI application and related modules for the SCARE Unified Dashboard.
-"""
+# This file indicates that 'src/api' is a Python package
