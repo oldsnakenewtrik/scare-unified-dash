@@ -824,8 +824,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 campaign_category,
                 campaign_type,
                 network,
-                pretty_network,  # Restored
-                pretty_source,   # Restored
+                pretty_network,  -- Removed invalid comment
+                pretty_source,   -- Removed invalid comment
                 display_order,
                 is_active
             ) VALUES (
@@ -836,8 +836,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 :campaign_category,
                 :campaign_type,
                 :network,
-                :pretty_network,  # Restored
-                :pretty_source,   # Restored
+                :pretty_network,  -- Removed invalid comment
+                :pretty_source,   -- Removed invalid comment
                 :display_order,
                 TRUE
             )
