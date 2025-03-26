@@ -81,8 +81,8 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
-      ...(options.headers || {})
-    },
+      // Line 84 was a duplicate and removed
+    }, // Added comma here
     // Add method and data for POST/PUT etc.
     method: options.method || 'get', // Default to 'get' if not specified
     data: options.data || undefined // Add data payload if present in options
