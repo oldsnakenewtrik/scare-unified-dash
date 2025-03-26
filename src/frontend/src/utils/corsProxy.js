@@ -89,6 +89,9 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
   };
   
   try {
+    // VERY EXPLICIT LOGGING BEFORE AXIOS CALL
+    console.log(`[corsProxy] Executing axios call. Method: ${axiosConfig.method}, URL: ${axiosConfig.url || fullUrl}, Data:`, axiosConfig.data);
+    
     // Use the generic axios(config) call instead of axios.get
     const response = await axios(axiosConfig);
     
