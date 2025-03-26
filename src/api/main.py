@@ -507,54 +507,30 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Query aggregated data directly from the sm_campaign_performance view
-        # This view already contains mapping details and aggregated metrics per campaign/date
+        # TEMPORARY FIX: Query only the mapping table to restore basic dashboard functionality
+        # This avoids the join issue causing 0 records, but metrics will be 0
         query = text("""
             SELECT
-                -- Select mapping details directly from the view
-                -- Note: 'campaign_name' in the view is already the 'pretty_campaign_name'
-                -- We need the mapping ID for drag-and-drop key, so join back to mapping table just for that
-                m.id, -- Get ID from mapping table
-                perf.platform AS source_system, -- Use platform from view as source_system
-                perf.campaign_id::VARCHAR AS external_campaign_id, -- Use campaign_id from view
-                perf.original_campaign_name,
-                perf.campaign_name AS pretty_campaign_name, -- Use campaign_name from view as pretty_name
-                perf.campaign_category,
-                perf.campaign_type,
-                perf.network, -- Use network from view
-                m.pretty_network, -- Get pretty_network from mapping table
-                m.pretty_source, -- Get pretty_source from mapping table
-                m.display_order, -- Get display_order from mapping table
-                
-                -- Sum metrics across all dates for each campaign
-                SUM(perf.impressions) AS impressions,
-                SUM(perf.clicks) AS clicks,
-                SUM(perf.conversions) AS conversions,
-                SUM(perf.cost) AS cost
-            FROM public.sm_campaign_performance perf
-            -- Join back to mapping table primarily to get ID and display_order
-            JOIN public.sm_campaign_name_mapping m
-                ON TRIM(perf.campaign_id::VARCHAR) = TRIM(m.external_campaign_id) -- Added TRIM
-                AND LOWER(perf.platform) = LOWER(m.source_system)
-            WHERE m.is_active = TRUE -- Ensure we only get active mappings
-            GROUP BY
-                m.id, -- Group by all selected non-aggregated columns
-                perf.platform,
-                perf.campaign_id,
-                perf.original_campaign_name,
-                perf.campaign_name,
-                perf.campaign_category,
-                perf.campaign_type,
-                perf.network,
-                m.pretty_network,
-                m.pretty_source,
-                m.display_order
-            ORDER BY m.display_order, pretty_campaign_name -- Order by display_order from mapping table
+                id,
+                source_system,
+                external_campaign_id,
+                original_campaign_name,
+                pretty_campaign_name,
+                campaign_category,
+                campaign_type,
+                network,
+                pretty_network,
+                pretty_source,
+                display_order
+            FROM public.sm_campaign_name_mapping
+            WHERE is_active = TRUE
+            ORDER BY display_order, pretty_campaign_name
         """)
         
         result = db.execute(query)
         campaigns = []
         
+        # Add placeholder metrics since we are not joining
         for row in result:
             campaign = {
                 "id": row.id,
@@ -565,11 +541,13 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 "campaign_category": row.campaign_category,
                 "campaign_type": row.campaign_type,
                 "network": row.network,
+                "pretty_network": row.pretty_network, # Include even if column doesn't exist yet (will be None)
+                "pretty_source": row.pretty_source,   # Include even if column doesn't exist yet (will be None)
                 "display_order": row.display_order,
-                "impressions": row.impressions,
-                "clicks": row.clicks,
-                "conversions": float(row.conversions) if row.conversions else 0,
-                "cost": float(row.cost) if row.cost else 0
+                "impressions": 0, # Placeholder
+                "clicks": 0,      # Placeholder
+                "conversions": 0.0, # Placeholder
+                "cost": 0.0       # Placeholder
             }
             campaigns.append(campaign)
         
@@ -822,8 +800,6 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 campaign_category,
                 campaign_type,
                 network,
-                pretty_network,
-                pretty_source,
                 display_order,
                 is_active
             ) VALUES (
@@ -834,8 +810,6 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 :campaign_category,
                 :campaign_type,
                 :network,
-                :pretty_network,
-                :pretty_source,
                 :display_order,
                 TRUE
             )
@@ -851,8 +825,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
             "campaign_category": mapping.campaign_category,
             "campaign_type": mapping.campaign_type,
             "network": mapping.network,
-            "pretty_network": mapping.pretty_network, # Re-added
-            "pretty_source": mapping.pretty_source,   # Re-added
+            # "pretty_network": mapping.pretty_network, # Temporarily removed
+            # "pretty_source": mapping.pretty_source,   # Temporarily removed
             "display_order": mapping.display_order or 999 # Default display_order
         }
 
