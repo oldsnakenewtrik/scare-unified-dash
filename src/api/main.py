@@ -507,35 +507,40 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Query campaign data
+        # Query campaign data using the sm_campaign_performance view which aggregates metrics
         query = text("""
-            SELECT 
-                cm.id, 
-                cm.source_system, 
+            SELECT
+                cm.id,
+                cm.source_system,
                 cm.external_campaign_id,
                 cm.original_campaign_name,
                 cm.pretty_campaign_name,
                 cm.campaign_category,
                 cm.campaign_type,
-                cm.network,
+                cm.network, -- Use network from mapping table
+                cm.pretty_network, -- Also include pretty_network
+                cm.pretty_source, -- Also include pretty_source
                 cm.display_order,
-                COALESCE(SUM(cf.impressions), 0) AS impressions,
-                COALESCE(SUM(cf.clicks), 0) AS clicks,
-                COALESCE(SUM(cf.conversions), 0) AS conversions,
-                COALESCE(SUM(cf.spend), 0) AS cost
-            FROM public.sm_campaign_name_mapping cm -- Corrected table name
-            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id
-                AND cm.source_system = cf.source_system
+                COALESCE(SUM(perf.impressions), 0) AS impressions,
+                COALESCE(SUM(perf.clicks), 0) AS clicks,
+                COALESCE(SUM(perf.conversions), 0) AS conversions,
+                COALESCE(SUM(perf.cost), 0) AS cost
+            FROM public.sm_campaign_name_mapping cm
+            LEFT JOIN public.sm_campaign_performance perf
+                ON cm.external_campaign_id = perf.campaign_id::VARCHAR -- Ensure type match if campaign_id is not VARCHAR
+                AND cm.source_system = perf.platform -- Match source_system with platform from view
             WHERE cm.is_active = TRUE
-            GROUP BY 
-                cm.id, 
-                cm.source_system, 
+            GROUP BY
+                cm.id, -- Group by all selected non-aggregated columns from cm
+                cm.source_system,
                 cm.external_campaign_id,
                 cm.original_campaign_name,
                 cm.pretty_campaign_name,
                 cm.campaign_category,
                 cm.campaign_type,
                 cm.network,
+                cm.pretty_network,
+                cm.pretty_source,
                 cm.display_order
             ORDER BY cm.display_order, cm.pretty_campaign_name
         """)
