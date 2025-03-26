@@ -81,14 +81,19 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
-    }
+      ...(options.headers || {})
+    },
+    // Add method and data for POST/PUT etc.
+    method: options.method || 'get', // Default to 'get' if not specified
+    data: options.data || undefined // Add data payload if present in options
   };
   
   try {
-    const response = await axios.get(fullUrl, axiosConfig);
+    // Use the generic axios(config) call instead of axios.get
+    const response = await axios(axiosConfig);
     
     // Log the raw response for debugging
-    console.log(`Raw response from ${endpoint}:`, response);
+    console.log(`Raw response from ${endpoint} (${axiosConfig.method}):`, response);
     
     // Handle the case where the API returns a 404 inside a 200 response
     // This is not ideal but sometimes happens with certain backend implementations
