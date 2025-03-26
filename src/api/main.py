@@ -810,8 +810,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 campaign_category,
                 campaign_type,
                 network,
-                # pretty_network, -- Removed, column does not exist in sm_campaign_name_mapping
-                # pretty_source,  -- Removed, column does not exist in sm_campaign_name_mapping
+                pretty_network,  # Re-added
+                pretty_source,   # Re-added
                 display_order,
                 is_active
             ) VALUES (
@@ -822,8 +822,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 :campaign_category,
                 :campaign_type,
                 :network,
-                # :pretty_network, -- Removed
-                # :pretty_source,  -- Removed
+                :pretty_network,  # Re-added
+                :pretty_source,   # Re-added
                 :display_order,
                 TRUE
             )
@@ -839,6 +839,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
             "campaign_category": mapping.campaign_category,
             "campaign_type": mapping.campaign_type,
             "network": mapping.network,
+            "pretty_network": mapping.pretty_network, # Re-added
+            "pretty_source": mapping.pretty_source,   # Re-added
             "display_order": mapping.display_order or 999 # Default display_order
         }
 
