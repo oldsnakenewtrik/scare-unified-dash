@@ -528,8 +528,9 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 COALESCE(SUM(perf.cost), 0) AS cost
             FROM public.sm_campaign_name_mapping m -- Start with mapping table
             LEFT JOIN public.sm_campaign_performance perf -- LEFT JOIN to performance view
-                ON TRIM(m.external_campaign_id) = TRIM(perf.campaign_id::VARCHAR) -- Reverted to TRIM + VARCHAR cast
-                AND LOWER(m.source_system) = LOWER(perf.platform)
+                ON LOWER(m.source_system) = LOWER(perf.platform) -- Match platform first
+                AND perf.campaign_id IS NOT NULL -- Explicitly check for non-NULL ID in view
+                AND TRIM(m.external_campaign_id)::TEXT = TRIM(perf.campaign_id::TEXT) -- Then compare IDs
             WHERE m.is_active = TRUE
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
