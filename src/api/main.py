@@ -877,8 +877,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 campaign_category,
                 campaign_type,
                 network,
-                pretty_network,
-                pretty_source,
+                # pretty_network, -- Removed, column does not exist in sm_campaign_name_mapping
+                # pretty_source,  -- Removed, column does not exist in sm_campaign_name_mapping
                 display_order,
                 is_active
             ) VALUES (
@@ -889,15 +889,16 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 :campaign_category,
                 :campaign_type,
                 :network,
-                :pretty_network,
-                :pretty_source,
+                # :pretty_network, -- Removed
+                # :pretty_source,  -- Removed
                 :display_order,
                 TRUE
             )
             RETURNING id
         """)
-        
-        result = db.execute(query, {
+
+        # Prepare parameters, excluding the removed fields
+        params = {
             "source_system": mapping.source_system,
             "external_campaign_id": mapping.external_campaign_id,
             "original_campaign_name": mapping.original_campaign_name,
@@ -905,29 +906,34 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
             "campaign_category": mapping.campaign_category,
             "campaign_type": mapping.campaign_type,
             "network": mapping.network,
-            "pretty_network": mapping.pretty_network,
-            "pretty_source": mapping.pretty_source,
-            "display_order": mapping.display_order or 999
-        })
-        
-        # Commit the transaction
-        db.commit()
-        
-        # Get the new ID
+            "display_order": mapping.display_order or 999 # Default display_order
+        }
+
+        logger.info(f"Executing insert with params: {params}")
+        result = db.execute(query, params)
+
+        logger.info("Insert executed, attempting commit...")
+        db.commit() # Commit happens here
+        logger.info("Commit successful.")
+
         new_id = result.fetchone()[0]
-        
+        logger.info(f"Successfully created campaign mapping with ID: {new_id}")
         return {"id": new_id, "message": "Campaign mapping created successfully"}
-        
+
     except SQLAlchemyError as e:
         db.rollback()
         error_msg = f"Database error creating campaign mapping: {str(e)}"
         logger.error(error_msg)
-        return {"error": error_msg, "status": "error"}
+        logger.error(traceback.format_exc()) # Log full traceback
+        # Raise HTTPException for clearer error reporting
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
     except Exception as e:
         db.rollback()
-        error_msg = f"Error creating campaign mapping: {str(e)}"
+        error_msg = f"Unexpected error creating campaign mapping: {str(e)}"
         logger.error(error_msg)
-        return {"error": error_msg, "status": "error"}
+        logger.error(traceback.format_exc()) # Log full traceback
+        # Raise HTTPException for clearer error reporting
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
 @app.post("/api/campaign-order", tags=["Campaigns"])
 async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
