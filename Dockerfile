@@ -73,8 +73,8 @@ ENV PORT=5000
 # Expose the port
 EXPOSE 5000
 
-# Copy entrypoint script
-COPY docker_entrypoint.sh /app/docker_entrypoint.sh
+# Copy entrypoint script from its new location
+COPY scripts/docker_entrypoint.sh /app/docker_entrypoint.sh
 
 # Make entrypoint script executable
 RUN chmod +x /app/docker_entrypoint.sh
