@@ -497,15 +497,15 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
     try:
         logger.info("Fetching hierarchical campaign data")
         
-        # Check if campaign_mappings table exists
+        # Check if sm_campaign_name_mapping table exists
         try:
-            check_query = text("SELECT COUNT(*) FROM campaign_mappings LIMIT 1")
+            check_query = text("SELECT COUNT(*) FROM public.sm_campaign_name_mapping LIMIT 1") # Corrected table name
             result = db.execute(check_query)
             count = result.scalar()
-            logger.info(f"campaign_mappings table exists, found {count} records")
+            logger.info(f"public.sm_campaign_name_mapping table exists, found {count} records") # Corrected log message
         except Exception as e:
-            logger.error(f"Error checking campaign_mappings table: {str(e)}")
-            return {"error": f"Database error: campaign_mappings table may not exist. {str(e)}", "status": "error"}
+            logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
+            return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
         # Query campaign data
         query = text("""
@@ -523,8 +523,8 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 COALESCE(SUM(cf.clicks), 0) AS clicks,
                 COALESCE(SUM(cf.conversions), 0) AS conversions,
                 COALESCE(SUM(cf.spend), 0) AS cost
-            FROM campaign_mappings cm
-            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id 
+            FROM public.sm_campaign_name_mapping cm -- Corrected table name
+            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id
                 AND cm.source_system = cf.source_system
             WHERE cm.is_active = TRUE
             GROUP BY 
@@ -917,7 +917,6 @@ async def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
-
 
 @app.post("/api/campaign-order", tags=["Campaigns"])
 async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
