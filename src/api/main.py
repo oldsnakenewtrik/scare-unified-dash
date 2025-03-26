@@ -534,7 +534,7 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             FROM public.sm_campaign_performance perf
             -- Join back to mapping table primarily to get ID and display_order
             JOIN public.sm_campaign_name_mapping m
-                ON perf.campaign_id::VARCHAR = m.external_campaign_id
+                ON TRIM(perf.campaign_id::VARCHAR) = TRIM(m.external_campaign_id) -- Added TRIM
                 AND LOWER(perf.platform) = LOWER(m.source_system)
             WHERE m.is_active = TRUE -- Ensure we only get active mappings
             GROUP BY
