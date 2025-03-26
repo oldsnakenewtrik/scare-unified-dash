@@ -76,6 +76,7 @@ const fetchThroughProxy = async (endpoint, params = {}, options = {}) => {
   
   // Set up request options
   const axiosConfig = {
+    url: fullUrl, // Add the URL to the config object
     params,
     timeout: options.timeout || DEFAULT_TIMEOUT,
     headers: {
