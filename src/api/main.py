@@ -528,7 +528,7 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             FROM public.sm_campaign_name_mapping cm
             LEFT JOIN public.sm_campaign_performance perf
                 ON cm.external_campaign_id = perf.campaign_id::VARCHAR -- Ensure type match if campaign_id is not VARCHAR
-                AND cm.source_system = perf.platform -- Match source_system with platform from view
+                AND LOWER(cm.source_system) = LOWER(perf.platform) -- Case-insensitive match
             WHERE cm.is_active = TRUE
             GROUP BY
                 cm.id, -- Group by all selected non-aggregated columns from cm
