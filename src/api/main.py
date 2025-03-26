@@ -206,74 +206,7 @@ app.add_middleware(
     allow_headers=allowed_headers,
 )
 
-# Add a custom middleware to add CORS headers to 404 responses
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    """Add CORS headers to all responses, including error responses"""
-    try:
-        # Process the request
-        response = await call_next(request)
-        
-        # Add CORS headers to all responses, including error responses
-        origin = request.headers.get("origin")
-        if origin and (origin in allowed_origins or "*" in allowed_origins):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true" if allow_credentials else "false"
-            response.headers["Access-Control-Allow-Methods"] = ", ".join(allowed_methods)
-            response.headers["Access-Control-Allow-Headers"] = ", ".join(allowed_headers)
-        
-        return response
-    except Exception as e:
-        logger.error(f"Error in CORS middleware: {str(e)}")
-        # Re-raise the exception to be handled by FastAPI
-        raise
-
-# Add middleware to log all requests and add CORS headers
-@app.middleware("http")
-async def add_cors_headers(request, call_next):
-    start_time = time.time()
-    try:
-        # Process the request
-        response = await call_next(request)
-        
-        # Only add CORS headers if we don't already have them
-        if "Access-Control-Allow-Origin" not in response.headers:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        
-        # Calculate processing time
-        process_time = time.time() - start_time
-        response.headers["X-Process-Time"] = str(process_time)
-        
-        # Log the request path and status code
-        path = request.url.path
-        logger.info(f"Request: {request.method} {path} - Status: {response.status_code}")
-        
-        return response
-    except Exception as e:
-        # Log the error
-        path = request.url.path
-        logger.error(f"Error processing request to {path}: {str(e)}")
-        logger.error(traceback.format_exc())
-        
-        # Return a proper error response
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Internal server error", "detail": str(e)},
-        )
-
-# Add a new middleware to properly handle 404 errors
-@app.middleware("http")
-async def handle_404(request, call_next):
-    response = await call_next(request)
-    
-    # If the response status code is 404, make sure it's returned as a proper 404
-    if response.status_code == 404:
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Not Found", "path": request.url.path, "status_code": 404}
-        )
-    
-    return response
+# Custom middlewares below were removed to simplify header handling and rely on the main CORSMiddleware.
 
 # Add WebSocket support
 try:
@@ -934,6 +867,55 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
         logger.error(traceback.format_exc()) # Log full traceback
         # Raise HTTPException for clearer error reporting
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
+
+
+@app.delete("/api/campaign-mappings/{mapping_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Campaigns"])
+async def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
+    """
+    Delete a campaign mapping by its ID.
+    """
+    logger.info(f"Attempting to delete campaign mapping with ID: {mapping_id}")
+    try:
+        # Check if the mapping exists first
+        check_query = text("SELECT id FROM public.sm_campaign_name_mapping WHERE id = :id")
+        existing = db.execute(check_query, {"id": mapping_id}).fetchone()
+
+        if not existing:
+            logger.warning(f"Campaign mapping with ID {mapping_id} not found for deletion.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Campaign mapping with ID {mapping_id} not found")
+
+        # Execute the delete operation
+        delete_query = text("DELETE FROM public.sm_campaign_name_mapping WHERE id = :id")
+        result = db.execute(delete_query, {"id": mapping_id})
+
+        # Verify deletion
+        if result.rowcount == 0:
+            # This case should ideally not happen if the check above passed, but good to handle
+            logger.error(f"Failed to delete campaign mapping ID {mapping_id} even though it was found.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete campaign mapping after finding it.")
+
+        db.commit()
+        logger.info(f"Successfully deleted campaign mapping with ID: {mapping_id}")
+        # Return No Content on successful deletion
+        return
+
+    except HTTPException:
+        # Re-raise HTTPException to return specific status codes (like 404)
+        db.rollback()
+        raise
+    except SQLAlchemyError as e:
+        db.rollback()
+        error_msg = f"Database error deleting campaign mapping ID {mapping_id}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
+    except Exception as e:
+        db.rollback()
+        error_msg = f"Unexpected error deleting campaign mapping ID {mapping_id}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
+
 
 @app.post("/api/campaign-order", tags=["Campaigns"])
 async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
