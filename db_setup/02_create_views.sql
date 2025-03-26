@@ -6,29 +6,28 @@ SELECT
     'google' as platform, -- Simplified platform name
     g.network as network,
     g.date,
-    g.campaign_id::TEXT as campaign_id, -- Cast to TEXT
+    TRIM(g.campaign_id::TEXT) as campaign_id, -- Trim and Cast to TEXT
     COALESCE(m.pretty_campaign_name, g.campaign_name) as campaign_name,
     g.campaign_name as original_campaign_name,
-    g.location_id,
-    l.region_code,
-    l.location_name,
-    l.country,
+    NULL::INT as location_id, -- No location_id in sm_fact_google_ads
+    NULL::VARCHAR as region_code,
+    NULL::VARCHAR as location_name,
+    NULL::VARCHAR as country,
     COALESCE(m.campaign_category, 'Uncategorized') as campaign_category,
     COALESCE(m.campaign_type, 'Uncategorized') as campaign_type,
     g.impressions,
     g.clicks,
     g.cost,
     g.conversions,
-    g.conversion_rate,
-    g.cost_per_conversion
-FROM 
+    NULL::DECIMAL as conversion_rate, -- Column likely missing
+    NULL::DECIMAL as cost_per_conversion -- Column likely missing
+FROM
     public.sm_fact_google_ads g
-LEFT JOIN 
-    public.sm_dim_location l ON g.location_id = l.location_id
+-- LEFT JOIN public.sm_dim_location l ON g.location_id = l.location_id -- Removed join as location_id doesn't exist in fact table
 LEFT JOIN
     public.sm_campaign_name_mapping m
-        ON LOWER(m.source_system) = 'google ads' -- Case-insensitive literal
-        AND TRIM(m.external_campaign_id)::TEXT = TRIM(g.campaign_id::TEXT) -- Robust comparison
+        ON LOWER(m.source_system) = 'google' -- Use simplified name 'google'
+        AND m.external_campaign_id = g.campaign_id::TEXT -- Simplest TEXT comparison
 
 UNION ALL
 
@@ -36,29 +35,28 @@ SELECT
     'bing' as platform, -- Simplified platform name
     b.network as network,
     b.date,
-    b.campaign_id::TEXT as campaign_id, -- Cast to TEXT
+    TRIM(b.campaign_id::TEXT) as campaign_id, -- Trim and Cast to TEXT
     COALESCE(m.pretty_campaign_name, b.campaign_name) as campaign_name,
     b.campaign_name as original_campaign_name,
-    b.location_id,
-    l.region_code,
-    l.location_name,
-    l.country,
+    NULL::INT as location_id, -- Assume location_id might not exist in sm_fact_bing_ads either
+    NULL::VARCHAR as region_code,
+    NULL::VARCHAR as location_name,
+    NULL::VARCHAR as country,
     COALESCE(m.campaign_category, 'Uncategorized') as campaign_category,
     COALESCE(m.campaign_type, 'Uncategorized') as campaign_type,
     b.impressions,
     b.clicks,
     b.cost,
     b.conversions,
-    b.conversion_rate,
-    b.cost_per_conversion
-FROM 
+    NULL::DECIMAL as conversion_rate, -- Assume column might be missing
+    NULL::DECIMAL as cost_per_conversion -- Assume column might be missing
+FROM
     public.sm_fact_bing_ads b
-LEFT JOIN 
-    public.sm_dim_location l ON b.location_id = l.location_id
+-- LEFT JOIN public.sm_dim_location l ON b.location_id = l.location_id -- Removed join as location_id might not exist
 LEFT JOIN
     public.sm_campaign_name_mapping m
-        ON LOWER(m.source_system) = 'bing ads' -- Case-insensitive literal
-        AND TRIM(m.external_campaign_id)::TEXT = TRIM(b.campaign_id::TEXT) -- Robust comparison
+        ON LOWER(m.source_system) = 'bing' -- Use simplified name 'bing'
+        AND m.external_campaign_id = b.campaign_id::TEXT -- Simplest TEXT comparison
 
 UNION ALL
 
@@ -66,7 +64,7 @@ SELECT
     'redtrack' as platform, -- Already simple
     NULL as network,
     r.date,
-    r.campaign_id::TEXT as campaign_id, -- Cast to TEXT
+    TRIM(r.campaign_id::TEXT) as campaign_id, -- Trim and Cast to TEXT
     COALESCE(m.pretty_campaign_name, r.campaign_name) as campaign_name,
     r.campaign_name as original_campaign_name,
     NULL as location_id,
@@ -86,7 +84,7 @@ FROM
 LEFT JOIN
     public.sm_campaign_name_mapping m
         ON LOWER(m.source_system) = 'redtrack' -- Case-insensitive literal
-        AND TRIM(m.external_campaign_id)::TEXT = TRIM(r.campaign_id::TEXT); -- Robust comparison
+        AND m.external_campaign_id = r.campaign_id::TEXT; -- Simplest TEXT comparison
 
 -- Create a view that combines campaign performance metrics
 CREATE OR REPLACE VIEW public.sm_campaign_performance AS

@@ -529,9 +529,13 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 COALESCE(SUM(perf.cost), 0) AS cost
             FROM public.sm_campaign_name_mapping m -- Start with mapping table
             LEFT JOIN public.sm_campaign_performance perf -- LEFT JOIN to performance view
-                -- Compare trimmed TEXT IDs and simplified/lowercased platform names
-                ON TRIM(m.external_campaign_id)::TEXT = TRIM(perf.campaign_id) -- campaign_id is TEXT from view
-                AND LOWER(m.source_system) = perf.platform -- platform is simplified/lower in view
+                ON (TRIM(m.external_campaign_id)::TEXT COLLATE "C") = (perf.campaign_id COLLATE "C") -- Compare cleaned IDs
+                AND perf.platform = CASE -- Match simplified platform name based on mapping source_system
+                                       WHEN LOWER(m.source_system) LIKE 'google%' THEN 'google'
+                                       WHEN LOWER(m.source_system) LIKE 'bing%' THEN 'bing'
+                                       WHEN LOWER(m.source_system) LIKE 'redtrack%' THEN 'redtrack'
+                                       ELSE 'unknown' -- Avoid matching if source_system is unexpected
+                                    END
             WHERE m.is_active = TRUE
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
