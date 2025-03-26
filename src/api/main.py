@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError # Added SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware

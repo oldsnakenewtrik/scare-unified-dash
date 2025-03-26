@@ -279,9 +279,18 @@ def create_engine_with_retry(database_url, **kwargs):
     except Exception as e:
         logger.error(f"Error parsing URL: {e}")
     
-    # Create engine
+    # Sanitize URL: Remove query parameters as they might contain invalid options like 'db_type'
+    # Necessary connection args (sslmode, etc.) are handled via kwargs["connect_args"]
+    sanitized_url = database_url.split("?")[0]
+    masked_sanitized_url = mask_password(sanitized_url)
+    if sanitized_url != database_url:
+        logger.info(f"Using sanitized URL (query params removed): {masked_sanitized_url}")
+    else:
+        logger.info("URL did not require sanitization.")
+
+    # Create engine using the sanitized URL
     try:
-        engine = create_engine(database_url, **kwargs)
+        engine = create_engine(sanitized_url, **kwargs)
         return engine
     except Exception as e:
         logger.error(f"Error creating engine: {e}")
