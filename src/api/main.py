@@ -742,28 +742,39 @@ async def get_campaign_mappings(db=Depends(get_db)):
             logger.warning("Campaign mappings table does not exist")
             return []
             
-        # Query all mappings
+        # Query all mappings, including all relevant fields
         query = text("""
-            SELECT id, source_system, external_campaign_id, campaign_name, created_at, updated_at
+            SELECT
+                id,
+                source_system,
+                external_campaign_id,
+                original_campaign_name, -- Use original name from table
+                pretty_campaign_name,
+                campaign_category,
+                campaign_type,
+                network,
+                pretty_network,
+                pretty_source,
+                display_order,
+                is_active,
+                created_at,
+                updated_at
             FROM public.sm_campaign_name_mapping
-            ORDER BY source_system, campaign_name
+            ORDER BY display_order, source_system, original_campaign_name -- Order by display_order first
         """)
         
         result = db.execute(query).fetchall()
         
-        # Convert to list of dictionaries
-        mappings = [
-            {
-                "id": row[0],
-                "source_system": row[1],
-                "external_campaign_id": row[2],
-                "campaign_name": row[3],
-                "created_at": row[4].isoformat() if row[4] else None,
-                "updated_at": row[5].isoformat() if row[5] else None
-            }
-            for row in result
-        ]
+        # Convert to list of dictionaries using column names
+        mappings = [dict(row._mapping) for row in result]
         
+        # Ensure datetime objects are converted to ISO format strings for JSON serialization
+        for mapping in mappings:
+            if mapping.get('created_at') and isinstance(mapping['created_at'], datetime.datetime):
+                mapping['created_at'] = mapping['created_at'].isoformat()
+            if mapping.get('updated_at') and isinstance(mapping['updated_at'], datetime.datetime):
+                mapping['updated_at'] = mapping['updated_at'].isoformat()
+
         return mappings
     except Exception as e:
         logger.error(f"Error getting campaign mappings: {str(e)}")
