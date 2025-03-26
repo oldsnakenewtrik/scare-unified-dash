@@ -508,104 +508,71 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # --- DEBUGGING JOIN ISSUE ---
-        logger.info("DEBUG JOIN: Fetching all active mappings")
-        map_query = text("""
-            SELECT id, source_system, external_campaign_id, original_campaign_name,
-                   pretty_campaign_name, campaign_category, campaign_type, network,
-                   pretty_network, pretty_source, display_order
-            FROM public.sm_campaign_name_mapping
-            WHERE is_active = TRUE
-        """)
-        map_result = db.execute(map_query)
-        # Convert mappings to a list of dicts, preparing keys for join
-        mappings_list = []
-        import re # Make sure re is imported at the top of the file
-
-        for row in map_result:
-            mapping_dict = dict(row._mapping)
-            # Aggressively clean and create comparable key in Python
-            src_sys = re.sub(r'[^a-z0-9\s]+', '', str(mapping_dict.get('source_system','')).strip().lower())
-            ext_id = re.sub(r'\D+', '', str(mapping_dict.get('external_campaign_id','')).strip()) # Keep only digits
-            mapping_dict['_join_key'] = f"{src_sys}|{ext_id}"
-            mappings_list.append(mapping_dict)
-        logger.info(f"DEBUG JOIN: Found {len(mappings_list)} active mappings.")
-        if mappings_list:
-            logger.info(f"DEBUG JOIN: First mapping example: {mappings_list[0]}")
-
-        logger.info("DEBUG JOIN: Fetching all performance data (grouped by campaign/platform)")
-        perf_query = text("""
+        # Query mapping data and LEFT JOIN performance data
+        query = text("""
             SELECT
-                LOWER(platform) as lower_platform,
-                TRIM(campaign_id) as trimmed_campaign_id, -- Use TEXT campaign_id from view
-                SUM(impressions) AS impressions,
-                SUM(clicks) AS clicks,
-                SUM(conversions) AS conversions,
-                SUM(cost) AS cost
-            FROM public.sm_campaign_performance
-            GROUP BY LOWER(platform), TRIM(campaign_id) -- Use TEXT campaign_id from view
+                m.id,
+                m.source_system, -- Use source_system from mapping table
+                m.external_campaign_id,
+                m.original_campaign_name,
+                m.pretty_campaign_name,
+                m.campaign_category,
+                m.campaign_type,
+                m.network, -- Use network from mapping table
+                m.pretty_network,
+                m.pretty_source,
+                m.display_order,
+                -- Use COALESCE around SUM for safety
+                COALESCE(SUM(perf.impressions), 0) AS impressions,
+                COALESCE(SUM(perf.clicks), 0) AS clicks,
+                COALESCE(SUM(perf.conversions), 0) AS conversions,
+                COALESCE(SUM(perf.cost), 0) AS cost
+            FROM public.sm_campaign_name_mapping m -- Start with mapping table
+            LEFT JOIN public.sm_campaign_performance perf -- LEFT JOIN to performance view
+                -- Compare trimmed TEXT IDs and simplified/lowercased platform names
+                ON TRIM(m.external_campaign_id)::TEXT = TRIM(perf.campaign_id) -- campaign_id is TEXT from view
+                AND LOWER(m.source_system) = perf.platform -- platform is simplified/lower in view
+            WHERE m.is_active = TRUE
+            GROUP BY
+                m.id, -- Group by all columns from the mapping table
+                m.source_system,
+                m.external_campaign_id,
+                m.original_campaign_name,
+                m.pretty_campaign_name,
+                m.campaign_category,
+                m.campaign_type,
+                m.network,
+                m.pretty_network,
+                m.pretty_source,
+                m.display_order
+            ORDER BY m.display_order, m.pretty_campaign_name
         """)
-        perf_result = db.execute(perf_query)
-        # Convert performance data to a dict keyed by lower_platform|trimmed_campaign_id
-        perf_dict = {}
-        for row in perf_result:
-            # Aggressively clean and create comparable key in Python
-            perf_platform = re.sub(r'[^a-z0-9\s]+', '', str(row.lower_platform).strip().lower())
-            perf_id = re.sub(r'\D+', '', str(row.trimmed_campaign_id).strip()) # Keep only digits
-            perf_key = f"{perf_platform}|{perf_id}"
-            perf_dict[perf_key] = dict(row._mapping)
-        logger.info(f"DEBUG JOIN: Found {len(perf_dict)} aggregated performance records.")
-        if perf_dict:
-            logger.info(f"DEBUG JOIN: First perf record example: {list(perf_dict.values())[0]}")
 
-        # Perform join in Python
-        logger.info("DEBUG JOIN: Performing join in Python...")
-        final_campaigns = []
-        join_matches = 0
-        # Log a sample of keys from both sides for direct comparison
-        if mappings_list:
-            logger.info(f"DEBUG JOIN: Sample mapping key: '{mappings_list[0]['_join_key']}' (Type: {type(mappings_list[0]['_join_key'])})")
-        if perf_dict:
-            sample_perf_key = list(perf_dict.keys())[0]
-            logger.info(f"DEBUG JOIN: Sample perf key: '{sample_perf_key}' (Type: {type(sample_perf_key)})")
+        result = db.execute(query)
+        campaigns = []
 
-        for i, mapping in enumerate(mappings_list):
-            mapping_key = mapping['_join_key']
-            # Log the key we are looking for in each iteration
-            if i < 5: # Log first 5 attempts
-                logger.info(f"DEBUG JOIN: Looking for mapping key: '{mapping_key}'")
-            perf_data = perf_dict.get(mapping_key)
-            if perf_data:
-                if i < 5: # Log first 5 matches
-                    logger.info(f"DEBUG JOIN: Match FOUND for key: '{mapping_key}'")
-                join_matches += 1
-                # Combine mapping data with aggregated performance data
-                campaign = {**mapping, **perf_data}
-                # Ensure correct types and handle potential None values from perf_data
-                campaign['impressions'] = campaign.get('impressions', 0) or 0
-                campaign['clicks'] = campaign.get('clicks', 0) or 0
-                campaign['conversions'] = float(campaign.get('conversions', 0.0) or 0.0)
-                campaign['cost'] = float(campaign.get('cost', 0.0) or 0.0)
-            else:
-                # No performance data found, use mapping data with 0 metrics
-                campaign = {
-                    **mapping,
-                    "impressions": 0,
-                    "clicks": 0,
-                    "conversions": 0.0,
-                    "cost": 0.0
-                }
-            # Remove the temporary join key
-            campaign.pop('_join_key', None)
-            final_campaigns.append(campaign)
+        for row in result:
+            campaign = {
+                "id": row.id,
+                "source_system": row.source_system,
+                "external_campaign_id": row.external_campaign_id,
+                "original_campaign_name": row.original_campaign_name,
+                "pretty_campaign_name": row.pretty_campaign_name,
+                "campaign_category": row.campaign_category,
+                "campaign_type": row.campaign_type,
+                "network": row.network,
+                "pretty_network": row.pretty_network,
+                "pretty_source": row.pretty_source,
+                "display_order": row.display_order,
+                "impressions": row.impressions,
+                "clicks": row.clicks,
+                "conversions": float(row.conversions) if row.conversions else 0,
+                "cost": float(row.cost) if row.cost else 0
+            }
+            campaigns.append(campaign)
 
-        logger.info(f"DEBUG JOIN: Join completed. Found {join_matches} matches.")
-        # Sort final list
-        final_campaigns.sort(key=lambda x: (x.get('display_order', 999), x.get('pretty_campaign_name', '')))
-
-        logger.info(f"Returning {len(final_campaigns)} campaign records from hierarchical endpoint (Python join)")
-        return final_campaigns
-        # --- END DEBUGGING JOIN ISSUE ---
+        logger.info(f"Returning {len(campaigns)} campaign records from hierarchical endpoint")
+        return campaigns
 
     except SQLAlchemyError as e:
         error_msg = f"Database error fetching hierarchical campaign data: {str(e)}"
