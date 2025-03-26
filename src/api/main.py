@@ -507,42 +507,49 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Query campaign data using the sm_campaign_performance view which aggregates metrics
+        # Query aggregated data directly from the sm_campaign_performance view
+        # This view already contains mapping details and aggregated metrics per campaign/date
         query = text("""
             SELECT
-                cm.id,
-                cm.source_system,
-                cm.external_campaign_id,
-                cm.original_campaign_name,
-                cm.pretty_campaign_name,
-                cm.campaign_category,
-                cm.campaign_type,
-                cm.network, -- Use network from mapping table
-                cm.pretty_network, -- Also include pretty_network
-                cm.pretty_source, -- Also include pretty_source
-                cm.display_order,
-                COALESCE(SUM(perf.impressions), 0) AS impressions,
-                COALESCE(SUM(perf.clicks), 0) AS clicks,
-                COALESCE(SUM(perf.conversions), 0) AS conversions,
-                COALESCE(SUM(perf.cost), 0) AS cost
-            FROM public.sm_campaign_name_mapping cm
-            LEFT JOIN public.sm_campaign_performance perf
-                ON cm.external_campaign_id = perf.campaign_id::VARCHAR -- Ensure type match if campaign_id is not VARCHAR
-                AND LOWER(cm.source_system) = LOWER(perf.platform) -- Case-insensitive match
-            WHERE cm.is_active = TRUE
+                -- Select mapping details directly from the view
+                -- Note: 'campaign_name' in the view is already the 'pretty_campaign_name'
+                -- We need the mapping ID for drag-and-drop key, so join back to mapping table just for that
+                m.id, -- Get ID from mapping table
+                perf.platform AS source_system, -- Use platform from view as source_system
+                perf.campaign_id::VARCHAR AS external_campaign_id, -- Use campaign_id from view
+                perf.original_campaign_name,
+                perf.campaign_name AS pretty_campaign_name, -- Use campaign_name from view as pretty_name
+                perf.campaign_category,
+                perf.campaign_type,
+                perf.network, -- Use network from view
+                m.pretty_network, -- Get pretty_network from mapping table
+                m.pretty_source, -- Get pretty_source from mapping table
+                m.display_order, -- Get display_order from mapping table
+                
+                -- Sum metrics across all dates for each campaign
+                SUM(perf.impressions) AS impressions,
+                SUM(perf.clicks) AS clicks,
+                SUM(perf.conversions) AS conversions,
+                SUM(perf.cost) AS cost
+            FROM public.sm_campaign_performance perf
+            -- Join back to mapping table primarily to get ID and display_order
+            JOIN public.sm_campaign_name_mapping m
+                ON perf.campaign_id::VARCHAR = m.external_campaign_id
+                AND LOWER(perf.platform) = LOWER(m.source_system)
+            WHERE m.is_active = TRUE -- Ensure we only get active mappings
             GROUP BY
-                cm.id, -- Group by all selected non-aggregated columns from cm
-                cm.source_system,
-                cm.external_campaign_id,
-                cm.original_campaign_name,
-                cm.pretty_campaign_name,
-                cm.campaign_category,
-                cm.campaign_type,
-                cm.network,
-                cm.pretty_network,
-                cm.pretty_source,
-                cm.display_order
-            ORDER BY cm.display_order, cm.pretty_campaign_name
+                m.id, -- Group by all selected non-aggregated columns
+                perf.platform,
+                perf.campaign_id,
+                perf.original_campaign_name,
+                perf.campaign_name,
+                perf.campaign_category,
+                perf.campaign_type,
+                perf.network,
+                m.pretty_network,
+                m.pretty_source,
+                m.display_order
+            ORDER BY m.display_order, pretty_campaign_name -- Order by display_order from mapping table
         """)
         
         result = db.execute(query)
