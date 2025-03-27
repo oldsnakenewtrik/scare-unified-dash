@@ -979,58 +979,9 @@ async def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
-
-@app.post("/api/campaign-mappings/archive", status_code=status.HTTP_200_OK, tags=["Campaigns"])
-async def archive_campaign_mapping(archive_data: CampaignMappingArchive, db=Depends(get_db)):
-    """
-    Archive or unarchive a campaign mapping by setting its is_active status.
-    """
-    logger.info(f"Setting is_active={archive_data.is_active} for campaign mapping ID: {archive_data.id}")
-    try:
-        # Check if the mapping exists first
-        check_query = text("SELECT id FROM public.sm_campaign_name_mapping WHERE id = :id")
-        existing = db.execute(check_query, {"id": archive_data.id}).fetchone()
-
-        if not existing:
-            logger.warning(f"Campaign mapping with ID {archive_data.id} not found for archive/unarchive.")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Campaign mapping with ID {archive_data.id} not found")
-
-        # Execute the update operation
-        update_query = text("""
-            UPDATE public.sm_campaign_name_mapping
-            SET is_active = :is_active, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id
-        """)
-        result = db.execute(update_query, {"id": archive_data.id, "is_active": archive_data.is_active})
-
-        # Verify update
-        if result.rowcount == 0:
-            logger.error(f"Failed to update is_active status for campaign mapping ID {archive_data.id}.")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update campaign mapping status.")
-
-        db.commit()
-        logger.info(f"Successfully set is_active={archive_data.is_active} for campaign mapping ID: {archive_data.id}")
-        return {"message": f"Campaign mapping {archive_data.id} status set to is_active={archive_data.is_active}"}
-
-    except HTTPException:
-        db.rollback()
-        raise
-    except SQLAlchemyError as e:
-        db.rollback()
-        error_msg = f"Database error updating campaign mapping ID {archive_data.id}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
-    except Exception as e:
-        db.rollback()
-        error_msg = f"Unexpected error updating campaign mapping ID {archive_data.id}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
-
-
+# Endpoint to Update Campaign Display Order (Corrected Indentation)
 @app.post("/api/campaign-order", tags=["Campaigns"])
-async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)): # Add function definition
+async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
     """
     Update display order for multiple campaigns
     """

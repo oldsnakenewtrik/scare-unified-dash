@@ -170,7 +170,9 @@ function UnifiedDashboard() {
         return {...source, networks: updatedNetworks};
       });
       
+      console.log("handleArchiveToggle - Before setCampaignData:", campaignData); // Log state BEFORE update
       setCampaignData(updatedData);
+      console.log("handleArchiveToggle - After setCampaignData (updatedData):", updatedData); // Log the data we tried to set
     } catch (err) {
       console.error('Error toggling archive state:', err);
       setError('Failed to update campaign archive status.');
