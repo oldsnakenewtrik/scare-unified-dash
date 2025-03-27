@@ -692,8 +692,8 @@ async def get_campaign_mappings(
             logger.warning("Campaign mappings table does not exist")
             return []
             
-        # Query all mappings, including all relevant fields
-        query = text("""
+        # Define base query string
+        base_query = """
             SELECT
                 id,
                 source_system,
@@ -712,20 +712,23 @@ async def get_campaign_mappings(
             FROM public.sm_campaign_name_mapping
             {where_clause} -- Add placeholder for WHERE clause
             ORDER BY display_order, source_system, original_campaign_name -- Order by display_order first
-        """)
+        """
         
         params = {}
-        where_clause = ""
+        # Conditionally add WHERE clause to the SQL string *before* creating TextClause
+        sql_string = base_query
         if source_system:
-            # Use case-insensitive comparison for filtering
-            where_clause = "WHERE LOWER(source_system) = LOWER(:source_system)"
+            sql_string += " WHERE LOWER(source_system) = LOWER(:source_system)"
             params["source_system"] = source_system
             logger.info(f"Filtering campaign mappings by source_system: {source_system}")
             
-        # Format the query with the potential WHERE clause
-        final_query = query.format(where_clause=where_clause)
+        # Add the ordering back
+        sql_string += " ORDER BY display_order, source_system, original_campaign_name"
+            
+        # Create TextClause from the final string
+        final_query = text(sql_string)
         
-        result = db.execute(text(final_query), params).fetchall() # Execute with params
+        result = db.execute(final_query, params).fetchall() # Execute with params
         
         # Convert to list of dictionaries using column names
         mappings = [dict(row._mapping) for row in result]
