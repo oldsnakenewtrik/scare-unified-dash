@@ -254,33 +254,45 @@ function CampaignMapping() {
   };
 
   // Helper function to handle network input - allow custom values
-  const handleNetworkInputChange = (event, newValue) => {
-    console.log("handleNetworkInputChange - newValue received:", newValue); // Log received value
-    const valueToSet = newValue; // Store it first
-    setCurrentMapping(prev => {
-      const newState = { ...prev, network: valueToSet };
-      console.log("handleNetworkInputChange - state *after* update:", newState); // Log state after update attempt
-      return newState;
-    });
+  const handleNetworkInputChange = (event, newValue, reason) => {
+    // Only update state if an option is selected or a new option is created (via Enter/blur)
+    // Ignore 'clear' or potentially 'blur' if newValue is null/empty
+    console.log("handleNetworkInputChange - newValue:", newValue, "Reason:", reason);
+    if (reason === 'selectOption' || reason === 'createOption' || (reason === 'blur' && newValue)) {
+      const valueToSet = newValue ? String(newValue) : ''; // Ensure string or empty string
+      setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
+    } else if (reason === 'clear') {
+       setCurrentMapping(prev => ({ ...prev, network: '' })); // Explicitly clear on 'clear'
+    }
+    // Intentionally do nothing for other reasons if newValue is empty/null
   };
 
   // Helper function to handle pretty network input - allow custom values
-  const handlePrettyNetworkChange = (event, newValue) => {
-    console.log("handlePrettyNetworkChange - newValue received:", newValue); // Log received value
-    const valueToSet = newValue; // Store it first
-    setCurrentMapping(prev => {
-      const newState = { ...prev, pretty_network: valueToSet };
-      console.log("handlePrettyNetworkChange - state *after* update:", newState); // Log state after update attempt
-      return newState;
-    });
+  const handlePrettyNetworkChange = (event, newValue, reason) => {
+    // Only update state if an option is selected or a new option is created (via Enter/blur)
+    // Ignore 'clear' or potentially 'blur' if newValue is null/empty
+    console.log("handlePrettyNetworkChange - newValue:", newValue, "Reason:", reason);
+    if (reason === 'selectOption' || reason === 'createOption' || (reason === 'blur' && newValue)) {
+      const valueToSet = newValue ? String(newValue) : ''; // Ensure string or empty string
+      setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
+    } else if (reason === 'clear') {
+       setCurrentMapping(prev => ({ ...prev, pretty_network: '' })); // Explicitly clear on 'clear'
+    }
+    // Intentionally do nothing for other reasons if newValue is empty/null
   };
 
   // Helper function to handle pretty source input - allow custom values
-  const handlePrettySourceChange = (event, newValue) => {
-    setCurrentMapping(prev => ({
-      ...prev,
-      pretty_source: newValue
-    }));
+  const handlePrettySourceChange = (event, newValue, reason) => {
+    // Only update state if an option is selected or a new option is created (via Enter/blur)
+    // Ignore 'clear' or potentially 'blur' if newValue is null/empty
+    console.log("handlePrettySourceChange - newValue:", newValue, "Reason:", reason);
+    if (reason === 'selectOption' || reason === 'createOption' || (reason === 'blur' && newValue)) {
+      const valueToSet = newValue ? String(newValue) : ''; // Ensure string or empty string
+      setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
+    } else if (reason === 'clear') {
+       setCurrentMapping(prev => ({ ...prev, pretty_source: '' })); // Explicitly clear on 'clear'
+    }
+    // Intentionally do nothing for other reasons if newValue is empty/null
   };
 
   // Helper function to handle source system input - allow custom values
