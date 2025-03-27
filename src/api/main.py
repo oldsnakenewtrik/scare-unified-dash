@@ -532,6 +532,7 @@ async def get_campaigns_hierarchical(
                 m.pretty_network,
                 m.pretty_source,
                 m.display_order,
+                m.is_active, -- Added is_active
                 -- Use COALESCE around SUM for safety
                 COALESCE(SUM(perf.impressions), 0) AS impressions,
                 COALESCE(SUM(perf.clicks), 0) AS clicks,
@@ -558,7 +559,8 @@ async def get_campaigns_hierarchical(
                 m.network,
                 m.pretty_network,
                 m.pretty_source,
-                m.display_order
+                m.display_order,
+                m.is_active -- Added is_active to GROUP BY
             ORDER BY m.display_order, m.pretty_campaign_name
         """
 
