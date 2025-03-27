@@ -487,10 +487,14 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Add the missing endpoints that match what the frontend is expecting
-@app.get("/api/campaigns-hierarchical", tags=["Campaigns"])
-async def get_campaigns_hierarchical(db=Depends(get_db)):
+@app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical], tags=["Campaigns"]) # Added response_model
+async def get_campaigns_hierarchical(
+    start_date: Optional[datetime.date] = Query(None, description="Start date for filtering metrics"),
+    end_date: Optional[datetime.date] = Query(None, description="End date for filtering metrics"),
+    db=Depends(get_db)
+):
     """
-    Get hierarchical campaign data including metrics 
+    Get hierarchical campaign data including aggregated metrics, optionally filtered by date.
     """
     # Debug print to confirm this route is registered
     logger.info("DEBUG: campaigns-hierarchical route was called!")
@@ -508,8 +512,8 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Query mapping data and LEFT JOIN performance data
-        query = text("""
+        # Define base query string with placeholder for date filter
+        query_base = """
             SELECT
                 m.id,
                 m.source_system, -- Use source_system from mapping table
@@ -536,7 +540,7 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                                        WHEN LOWER(m.source_system) LIKE 'redtrack%' THEN 'redtrack'
                                        ELSE 'unknown' -- Avoid matching if source_system is unexpected
                                     END
-            WHERE m.is_active = TRUE
+            WHERE m.is_active = TRUE {date_filter} -- Add placeholder for date filter
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
                 m.source_system,
@@ -550,9 +554,24 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 m.pretty_source,
                 m.display_order
             ORDER BY m.display_order, m.pretty_campaign_name
-        """)
+        """
 
-        result = db.execute(query)
+        params = {}
+        date_filter_sql = "" # Use a different variable name for the SQL part
+        # Add date filtering if start_date and end_date are provided
+        if start_date and end_date:
+            # Add the date condition and parameters
+            date_filter_sql = " AND perf.date BETWEEN :start_date AND :end_date"
+            params["start_date"] = start_date
+            params["end_date"] = end_date
+            logger.info(f"Filtering hierarchical data by date: {start_date} to {end_date}")
+
+        # Replace the placeholder in the base query string
+        # Ensure query_base is defined correctly before this point
+        final_sql = query_base.format(date_filter=date_filter_sql)
+        final_query = text(final_sql)
+
+        result = db.execute(final_query, params) # Pass params here
         campaigns = []
 
         for row in result:

@@ -91,9 +91,24 @@ function UnifiedDashboard() {
     setError(null);
     
     try {
-      // For hierarchical view data
-      const response = await corsProxy.get('/api/campaigns-hierarchical');
-      
+      let apiParams = {};
+      // Add date range parameters if not 'all-time'
+      if (activeTab !== 'all-time') {
+        const [year, month] = activeTab.split('-').map(Number);
+        const startDate = new Date(year, month - 1, 1);
+        const endDate = new Date(year, month, 0);
+        apiParams = {
+          start_date: startDate.toISOString().split('T')[0],
+          end_date: endDate.toISOString().split('T')[0]
+        };
+        console.log("Fetching hierarchical data with date range:", apiParams);
+      } else {
+        console.log("Fetching hierarchical data for all time");
+      }
+
+      // Fetch hierarchical data with optional date parameters
+      const response = await corsProxy.get('/api/campaigns-hierarchical', apiParams);
+
       // Log the raw response for debugging
       console.log('Raw hierarchical response:', response);
       
@@ -113,46 +128,11 @@ function UnifiedDashboard() {
         return campaign.is_active !== false;
       });
       
-      // Filter by date range if not "all-time"
-      let dateFilteredData = filteredData;
-      if (activeTab !== 'all-time') {
-        const [year, month] = activeTab.split('-').map(Number);
-        
-        // Get start and end date of the selected month
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
-        
-        // Format dates for API call
-        const formattedStartDate = startDate.toISOString().split('T')[0];
-        const formattedEndDate = endDate.toISOString().split('T')[0];
-        
-        // Call metrics API with date filter
-        try {
-          const metricsResponse = await corsProxy.get('/api/campaign-metrics', {
-            start_date: formattedStartDate,
-            end_date: formattedEndDate
-          });
-          
-          // Log raw metrics response for debugging
-          console.log('Raw metrics response:', metricsResponse);
-          
-          // Ensure metrics data is an array
-          const metricsData = Array.isArray(metricsResponse?.data) ? metricsResponse.data : [];
-          
-          console.log('Metrics data processed to array:', metricsData);
-          
-          // Map metrics data to hierarchical data
-          dateFilteredData = filteredData.map(campaign => {
-            const metrics = metricsData.find(m => m.campaign_id === campaign.id) || {};
-            return { ...campaign, metrics };
-          });
-        } catch (metricsErr) {
-          console.error('Error fetching metrics for date range:', metricsErr);
-          // Continue with the hierarchical data without metrics
-        }
-      }
+      // NOTE: Date filtering is now handled by the backend /api/campaigns-hierarchical endpoint.
+      // The responseData already contains metrics aggregated for the correct date range (or all time).
+      // No need for a second API call or manual merging here.
       
-      const organizedData = organizeHierarchicalData(dateFilteredData);
+      const organizedData = organizeHierarchicalData(filteredData); // Use filteredData directly
       setCampaignData(organizedData);
     } catch (err) {
       console.error('Error fetching campaign data:', err);
@@ -215,8 +195,9 @@ function UnifiedDashboard() {
       // Skip invalid items
       if (!item) return;
       
-      const source = item.source_system || 'Uncategorized';
-      const network = item.network || 'Uncategorized';
+      // Use pretty names for grouping if available, otherwise fallback
+      const source = item.pretty_source || item.source_system || 'Uncategorized';
+      const network = item.pretty_network || item.network || 'Uncategorized';
       
       if (!sourceGroups[source]) {
         sourceGroups[source] = {
