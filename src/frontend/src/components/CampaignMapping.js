@@ -254,39 +254,24 @@ function CampaignMapping() {
   };
 
   // Helper function to handle network input - allow custom values
-  const handleNetworkInputChange = (event, newValue, reason) => {
-    // Detailed logging
-    console.log(`handleNetworkInputChange - Reason: ${reason}, newValue:`, newValue, `(Type: ${typeof newValue})`);
+  const handleNetworkInputChange = (event, newValue) => {
+    // Reverted: Simply set state, ensuring string
     const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => {
-      const newState = { ...prev, network: valueToSet };
-      console.log("handleNetworkInputChange - State updated to:", newState.network);
-      return newState;
-    });
+    setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
   };
 
   // Helper function to handle pretty network input - allow custom values
-  const handlePrettyNetworkChange = (event, newValue, reason) => {
-    // Detailed logging
-    console.log(`handlePrettyNetworkChange - Reason: ${reason}, newValue:`, newValue, `(Type: ${typeof newValue})`);
+  const handlePrettyNetworkChange = (event, newValue) => {
+    // Reverted: Simply set state, ensuring string
     const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => {
-      const newState = { ...prev, pretty_network: valueToSet };
-      console.log("handlePrettyNetworkChange - State updated to:", newState.pretty_network);
-      return newState;
-    });
+    setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
   };
 
   // Helper function to handle pretty source input - allow custom values
-  const handlePrettySourceChange = (event, newValue, reason) => {
-    // Detailed logging
-    console.log(`handlePrettySourceChange - Reason: ${reason}, newValue:`, newValue, `(Type: ${typeof newValue})`);
+  const handlePrettySourceChange = (event, newValue) => {
+    // Reverted: Simply set state, ensuring string
     const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => {
-      const newState = { ...prev, pretty_source: valueToSet };
-      console.log("handlePrettySourceChange - State updated to:", newState.pretty_source);
-      return newState;
-    });
+    setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
   };
 
   // Helper function to handle source system input - allow custom values
@@ -299,9 +284,8 @@ function CampaignMapping() {
 
   // Save mapping to database
   const handleSaveMapping = async () => {
-    // Log the exact object being sent
-    console.log('Saving mapping data:', JSON.stringify(currentMapping, null, 2));
     try {
+      // console.log('Saving mapping data:', JSON.stringify(currentMapping, null, 2)); // Removed log
       await corsProxy.post('/api/campaign-mappings', currentMapping);
       setDialogOpen(false);
       setSuccess('Campaign mapping saved successfully!');
