@@ -255,38 +255,23 @@ function CampaignMapping() {
 
   // Helper function to handle network input - allow custom values
   const handleNetworkInputChange = (event, newValue) => {
-    // Only update if newValue is not null/undefined
-    if (newValue !== null && newValue !== undefined) {
-      const valueToSet = String(newValue); // Ensure string
-      console.log("handleNetworkInputChange - Setting state to:", valueToSet); // Keep log for now
-      setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
-    } else {
-      console.log("handleNetworkInputChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
-    }
+    // Simple version: Set state, ensuring string or empty string
+    const valueToSet = newValue ? String(newValue) : '';
+    setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
   };
 
   // Helper function to handle pretty network input - allow custom values
   const handlePrettyNetworkChange = (event, newValue) => {
-    // Only update if newValue is not null/undefined
-    if (newValue !== null && newValue !== undefined) {
-      const valueToSet = String(newValue); // Ensure string
-      console.log("handlePrettyNetworkChange - Setting state to:", valueToSet); // Keep log for now
-      setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
-    } else {
-      console.log("handlePrettyNetworkChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
-    }
+    // Simple version: Set state, ensuring string or empty string
+    const valueToSet = newValue ? String(newValue) : '';
+    setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
   };
 
   // Helper function to handle pretty source input - allow custom values
   const handlePrettySourceChange = (event, newValue) => {
-    // Only update if newValue is not null/undefined
-    if (newValue !== null && newValue !== undefined) {
-      const valueToSet = String(newValue); // Ensure string
-      console.log("handlePrettySourceChange - Setting state to:", valueToSet); // Keep log for now
-      setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
-    } else {
-      console.log("handlePrettySourceChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
-    }
+    // Simple version: Set state, ensuring string or empty string
+    const valueToSet = newValue ? String(newValue) : '';
+    setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
   };
 
   // Helper function to handle source system input - allow custom values
@@ -623,7 +608,7 @@ function CampaignMapping() {
                     name="pretty_network"
                     variant="outlined"
                     fullWidth
-                    // onBlur={handleBlur} // Removed onBlur handler
+                    onBlur={handleBlur} // Re-add onBlur handler
                   />
                 )}
               />
@@ -643,7 +628,7 @@ function CampaignMapping() {
                     name="pretty_source"
                     variant="outlined"
                     fullWidth
-                    // onBlur={handleBlur} // Removed onBlur handler
+                    onBlur={handleBlur} // Re-add onBlur handler
                   />
                 )}
               />
