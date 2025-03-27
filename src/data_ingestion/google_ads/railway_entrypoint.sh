@@ -42,82 +42,27 @@ find . -name "*.py" -exec cp {} /tmp/google_ads_scripts/ \; || echo "Failed to c
 echo "Contents of fallback directory:"
 ls -la /tmp/google_ads_scripts
 
-# Wait for database to be ready (for Docker/Railway deployment)
-echo "Waiting for database to be ready..."
-# Execute python script and capture its output, including the potential export command
-DB_CHECK_OUTPUT=$(python -c "
-import time
-import os
-import sys
-import sqlalchemy as sa
-from sqlalchemy.exc import OperationalError
+# Attempt to construct DATABASE_URL directly using expected internal values
+# Assuming PGPASSWORD might still be injected, but others are not.
+echo "Attempting to construct DATABASE_URL using internal defaults..."
+INTERNAL_HOST="postgres.railway.internal"
+INTERNAL_PORT="5432"
+INTERNAL_DB="railway" # Default Railway DB name, adjust if different
+INTERNAL_USER="${PGUSER:-postgres}" # Use PGUSER if set, else default to postgres
 
-retries = 0
-max_retries = 30
-db_url = os.environ.get('DATABASE_URL')
-
-if not db_url:
-    print('DATABASE_URL environment variable not set. Trying to construct from PG* variables...')
-    pg_host = os.environ.get('PGHOST')
-    pg_port = os.environ.get('PGPORT', '5432')
-    pg_user = os.environ.get('PGUSER')
-    pg_password = os.environ.get('PGPASSWORD')
-    pg_database = os.environ.get('PGDATABASE')
-
-    if all([pg_host, pg_user, pg_password, pg_database]):
-        db_url = f'postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}'
-        print(f'Constructed DATABASE_URL: postgresql://{pg_user}:****@{pg_host}:{pg_port}/{pg_database}')
-        # Print the export command to stdout
-        print(f'export DATABASE_URL=\"{db_url}\"')
-    else:
-        print('ERROR: Cannot construct DATABASE_URL from PG* variables either.')
-        sys.exit(1) # Exit if construction fails
-
-print(f'Connecting to database...') # Removed db_url from here
-
-# Connection test loop
-while retries < max_retries:
-    try:
-        engine = sa.create_engine(db_url)
-        conn = engine.connect()
-        conn.close()
-        print('Successfully connected to the database')
-        sys.exit(0) # Exit successfully if connection works
-    except OperationalError as e:
-        retries += 1
-        print(f'Cannot connect to database, retry {retries}/{max_retries}: {str(e)}')
-        time.sleep(2)
-    except Exception as e:
-        print(f'Unexpected error: {str(e)}')
-        sys.exit(1)
-
-print('Failed to connect to database after multiple retries')
-sys.exit(1)
-")
-DB_CHECK_RESULT=$? # Capture exit code of python script
-
-# Print the output from the python script (for logging)
-echo "Database Check Output:"
-echo "$DB_CHECK_OUTPUT"
-
-# Evaluate the output to execute the export command if present
-eval "$DB_CHECK_OUTPUT"
-
-# Check the exit code from the python script
-if [ $DB_CHECK_RESULT -ne 0 ]; then
-    echo "Database check or connection failed. Exiting entrypoint script."
-    exit $DB_CHECK_RESULT
-fi
-
-# Add a check to see if DATABASE_URL is now set
-if [ -z "$DATABASE_URL" ]; then
-    echo "ERROR: DATABASE_URL is still not set after check. Exiting."
+if [ -z "$PGPASSWORD" ]; then
+    echo "ERROR: PGPASSWORD environment variable is not set. Cannot construct DB URL."
     exit 1
-else
-    echo "DATABASE_URL is now set."
 fi
 
-# Determine if we're in the right directory
+# Construct and export the URL
+export DATABASE_URL="postgresql://${INTERNAL_USER}:${PGPASSWORD}@${INTERNAL_HOST}:${INTERNAL_PORT}/${INTERNAL_DB}"
+echo "Constructed and exported DATABASE_URL: postgresql://${INTERNAL_USER}:****@${INTERNAL_HOST}:${INTERNAL_PORT}/${INTERNAL_DB}"
+
+# Optional: Add a quick connection test here if needed, but main.py should handle it
+# python -c "import os, sqlalchemy; sqlalchemy.create_engine(os.environ['DATABASE_URL']).connect().close(); print('Quick DB connection test successful.')" || exit 1
+
+# Determine script directory (same as before)
 if [ -f main.py ]; then
     echo "Found main.py in current directory"
     SCRIPT_DIR="."
@@ -129,19 +74,12 @@ elif [ -f /tmp/google_ads_scripts/main.py ]; then
     SCRIPT_DIR="/tmp/google_ads_scripts"
 else
     echo "ERROR: Cannot find main.py in any expected location"
-    echo "Checking PATH environment:"
-    echo $PATH
-    echo "Trying to execute Python directly:"
-    python --version
-    # List all python files anywhere in the system
-    echo "Searching for main.py in entire filesystem:"
-    find / -name "main.py" 2>/dev/null
     exit 1
 fi
 
 echo "Using scripts from: ${SCRIPT_DIR}"
 
-# Create a secondary log file specifically for the ETL process
+# Create ETL log file (same as before)
 ETL_LOGFILE="/var/log/google_ads/etl_process.log"
 touch ${ETL_LOGFILE}
 echo "$(date) - Starting ETL process" >> ${ETL_LOGFILE}
