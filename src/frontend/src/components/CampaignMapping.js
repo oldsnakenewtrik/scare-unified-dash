@@ -282,6 +282,16 @@ function CampaignMapping() {
     }));
   };
 
+  // Capture value on blur, especially for freeSolo custom inputs
+  const handleBlur = (e) => {
+    const { name, value } = e.target;
+    // Only update if there's a value on blur
+    if (value) {
+      console.log(`handleBlur - Name: ${name}, Value: ${value}`); // DEBUG LOG
+      setCurrentMapping(prev => ({ ...prev, [name]: value }));
+    }
+  };
+
   // Save mapping to database
   const handleSaveMapping = async () => {
     try {
@@ -578,6 +588,7 @@ function CampaignMapping() {
                     name="network"
                     variant="outlined"
                     fullWidth
+                    onBlur={handleBlur} // Add onBlur handler
                   />
                 )}
               />
@@ -597,6 +608,7 @@ function CampaignMapping() {
                     name="pretty_network"
                     variant="outlined"
                     fullWidth
+                    onBlur={handleBlur} // Add onBlur handler
                   />
                 )}
               />
@@ -616,6 +628,7 @@ function CampaignMapping() {
                     name="pretty_source"
                     variant="outlined"
                     fullWidth
+                    onBlur={handleBlur} // Add onBlur handler
                   />
                 )}
               />
