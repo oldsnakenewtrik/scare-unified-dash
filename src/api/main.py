@@ -165,6 +165,8 @@ class CampaignHierarchical(BaseModel):
     campaign_category: Optional[str] = None
     campaign_type: Optional[str] = None
     network: Optional[str] = None
+    pretty_network: Optional[str] = None # Added
+    pretty_source: Optional[str] = None  # Added
     display_order: int
     impressions: Optional[int] = None
     clicks: Optional[int] = None
