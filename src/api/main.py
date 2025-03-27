@@ -1014,6 +1014,7 @@ async def archive_campaign_mapping(archive_data: CampaignMappingArchive, db=Depe
 
 
 @app.post("/api/campaign-order", tags=["Campaigns"])
+async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)): # Add function definition
     """
     Update display order for multiple campaigns
     """
