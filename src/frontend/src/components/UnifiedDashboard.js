@@ -118,15 +118,17 @@ function UnifiedDashboard() {
         ? response.data 
         : (Array.isArray(response?.data?.data) ? response.data.data : []);
       
-      console.log('Campaign data processed to array:', responseData);
+      console.log('Campaign data processed to array:', responseData); // Log data received from API
       
       // Process the data into a hierarchical structure and filter by archive status
+      console.log(`Filtering data with showArchived = ${showArchived}`); // Log filter status
       const filteredData = responseData.filter(campaign => {
         // If showing archived, include all campaigns
         if (showArchived) return true;
         // Otherwise only include active campaigns (not archived)
         return campaign.is_active !== false;
       });
+      console.log(`Data after filtering (showArchived=${showArchived}):`, filteredData); // Log data *after* filtering
       
       // NOTE: Date filtering is now handled by the backend /api/campaigns-hierarchical endpoint.
       // The responseData already contains metrics aggregated for the correct date range (or all time).
