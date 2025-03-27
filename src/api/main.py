@@ -692,43 +692,31 @@ async def get_campaign_mappings(
             logger.warning("Campaign mappings table does not exist")
             return []
             
-        # Define base query string
-        base_query = """
+        # Define base query parts without placeholders or initial ORDER BY
+        select_from_clause = """
             SELECT
-                id,
-                source_system,
-                external_campaign_id,
-                original_campaign_name, -- Use original name from table
-                pretty_campaign_name,
-                campaign_category,
-                campaign_type,
-                network,
-                pretty_network,
-                pretty_source,
-                display_order,
-                is_active,
-                created_at,
-                updated_at
+                id, source_system, external_campaign_id, original_campaign_name,
+                pretty_campaign_name, campaign_category, campaign_type, network,
+                pretty_network, pretty_source, display_order, is_active,
+                created_at, updated_at
             FROM public.sm_campaign_name_mapping
-            {where_clause} -- Add placeholder for WHERE clause
-            ORDER BY display_order, source_system, original_campaign_name -- Order by display_order first
         """
-        
+        order_clause = " ORDER BY display_order, source_system, original_campaign_name" # Define ORDER BY separately
+
         params = {}
-        # Conditionally add WHERE clause to the SQL string *before* creating TextClause
-        sql_string = base_query
+        where_clause = ""
+        # Conditionally build WHERE clause string
         if source_system:
-            sql_string += " WHERE LOWER(source_system) = LOWER(:source_system)"
+            where_clause = " WHERE LOWER(source_system) = LOWER(:source_system)"
             params["source_system"] = source_system
             logger.info(f"Filtering campaign mappings by source_system: {source_system}")
-            
-        # Add the ordering back
-        sql_string += " ORDER BY display_order, source_system, original_campaign_name"
-            
-        # Create TextClause from the final string
+
+        # Combine parts into final SQL string
+        sql_string = select_from_clause + where_clause + order_clause
+
+        # Create TextClause from the final string and execute
         final_query = text(sql_string)
-        
-        result = db.execute(final_query, params).fetchall() # Execute with params
+        result = db.execute(final_query, params).fetchall()
         
         # Convert to list of dictionaries using column names
         mappings = [dict(row._mapping) for row in result]
