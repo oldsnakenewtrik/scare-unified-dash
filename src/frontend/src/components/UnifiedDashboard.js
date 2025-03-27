@@ -123,6 +123,8 @@ function UnifiedDashboard() {
       // Process the data into a hierarchical structure and filter by archive status
       console.log(`Filtering data with showArchived = ${showArchived}`); // Log filter status
       const filteredData = responseData.filter(campaign => {
+        // Log each campaign's is_active status during filtering
+        console.log(`Filtering campaign ID ${campaign?.id}, is_active: ${campaign?.is_active}, showArchived: ${showArchived}`);
         // If showing archived, include all campaigns
         if (showArchived) return true;
         // Otherwise only include active campaigns (not archived)
@@ -156,23 +158,8 @@ function UnifiedDashboard() {
         is_active: newState
       });
       
-      // Update local state
-      const updatedData = campaignData.map(source => {
-        const updatedNetworks = source.networks.map(network => {
-          const updatedCampaigns = network.campaigns.map(campaign => {
-            if (campaign.id === campaignId) {
-              return {...campaign, is_active: newState};
-            }
-            return campaign;
-          });
-          return {...network, campaigns: updatedCampaigns};
-        });
-        return {...source, networks: updatedNetworks};
-      });
-      
-      console.log("handleArchiveToggle - Before setCampaignData:", campaignData); // Log state BEFORE update
-      setCampaignData(updatedData);
-      console.log("handleArchiveToggle - After setCampaignData (updatedData):", updatedData); // Log the data we tried to set
+      // Instead of optimistic update, re-fetch data after successful API call
+      fetchCampaignData();
     } catch (err) {
       console.error('Error toggling archive state:', err);
       setError('Failed to update campaign archive status.');
@@ -667,31 +654,20 @@ function UnifiedDashboard() {
                       No networks found for this source system.
                     </Typography>
                   )}
-                  {/* Source Totals Row */}
+                  {/* Source Totals Row - Moved inside AccordionDetails but after network map */}
                   {Object.keys(sourceSystem.networks).length > 0 && sourceSystem.totals && (
-                    <TableContainer component={Paper} sx={{ mt: 2, borderTop: '3px solid #23c785' }}>
-                      <Table size="small">
-                        <TableBody>
-                          <TableRow sx={{ '& td': { fontWeight: 'bold', fontSize: '1.1em' } }}>
-                            <TableCell colSpan={2} align="right">{sourceSystem.name} Total:</TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
-                            <TableCell align="right">
-                              {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}
-                            </TableCell>
-                            <TableCell align="right">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
-                            <TableCell align="right">
-                              {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}
-                            </TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
-                            <TableCell align="right">
-                              {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}
-                            </TableCell>
-                            <TableCell></TableCell> {/* Empty cell for Actions column */}
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                    <Paper sx={{ mt: 2, p: 1, borderTop: '3px solid #23c785', display: 'flex', justifyContent: 'space-around', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mr: 2 }}>{sourceSystem.name} Total:</Typography>
+                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end', flexGrow: 1 }}>
+                        <Box>Imp: {formatNumber(sourceSystem.totals.impressions)}</Box>
+                        <Box>Clicks: {formatNumber(sourceSystem.totals.clicks)}</Box>
+                        <Box>CTR: {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}</Box>
+                        <Box>Cost: {formatCurrency(sourceSystem.totals.cost)}</Box>
+                        <Box>CPC: {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}</Box>
+                        <Box>Conv: {formatNumber(sourceSystem.totals.conversions)}</Box>
+                        <Box>CPA: {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}</Box>
+                      </Box>
+                    </Paper>
                   )}
                 </AccordionDetails>
               </Accordion>
