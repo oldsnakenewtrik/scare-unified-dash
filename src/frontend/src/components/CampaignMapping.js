@@ -288,6 +288,8 @@ function CampaignMapping() {
 
   // Save mapping to database
   const handleSaveMapping = async () => {
+    // Log the exact object being sent
+    console.log('Saving mapping data:', JSON.stringify(currentMapping, null, 2));
     try {
       await corsProxy.post('/api/campaign-mappings', currentMapping);
       setDialogOpen(false);
