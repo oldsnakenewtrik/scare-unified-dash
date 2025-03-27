@@ -255,6 +255,7 @@ function CampaignMapping() {
 
   // Helper function to handle network input - allow custom values
   const handleNetworkInputChange = (event, newValue) => {
+    console.log("handleNetworkInputChange - newValue:", newValue); // DEBUG LOG
     // If it's a string (custom value) or a selected item from dropdown
     setCurrentMapping(prev => ({
       ...prev,
@@ -264,6 +265,7 @@ function CampaignMapping() {
 
   // Helper function to handle pretty network input - allow custom values
   const handlePrettyNetworkChange = (event, newValue) => {
+    console.log("handlePrettyNetworkChange - newValue:", newValue); // DEBUG LOG
     setCurrentMapping(prev => ({
       ...prev,
       pretty_network: newValue
