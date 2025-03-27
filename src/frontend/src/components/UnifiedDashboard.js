@@ -220,11 +220,27 @@ function UnifiedDashboard() {
     const result = Object.values(sourceGroups).map(source => {
       source.networks = Object.values(source.networks).map(network => {
         network.campaigns.sort((a, b) => a.display_order - b.display_order);
+        // Calculate network totals
+        network.totals = network.campaigns.reduce((acc, campaign) => {
+          acc.impressions += campaign.impressions || 0;
+          acc.clicks += campaign.clicks || 0;
+          acc.cost += campaign.cost || 0;
+          acc.conversions += campaign.conversions || 0;
+          return acc;
+        }, { impressions: 0, clicks: 0, cost: 0, conversions: 0 });
         return network;
       });
+      // Calculate source totals
+      source.totals = source.networks.reduce((acc, network) => {
+          acc.impressions += network.totals.impressions;
+          acc.clicks += network.totals.clicks;
+          acc.cost += network.totals.cost;
+          acc.conversions += network.totals.conversions;
+          return acc;
+      }, { impressions: 0, clicks: 0, cost: 0, conversions: 0 });
       return source;
     });
-    
+
     return result;
   };
   
@@ -616,6 +632,24 @@ function UnifiedDashboard() {
                                       </Draggable>
                                     ))}
                                     {provided.placeholder}
+                                    {/* Network Totals Row */}
+                                    <TableRow sx={{ '& td': { fontWeight: 'bold', borderTop: '2px solid #25385b' } }}>
+                                      <TableCell colSpan={2} align="right">Network Total:</TableCell>
+                                      <TableCell align="right">{formatNumber(network.totals.impressions)}</TableCell>
+                                      <TableCell align="right">{formatNumber(network.totals.clicks)}</TableCell>
+                                      <TableCell align="right">
+                                        {formatPercentage(calculateCTR(network.totals.clicks, network.totals.impressions))}
+                                      </TableCell>
+                                      <TableCell align="right">{formatCurrency(network.totals.cost)}</TableCell>
+                                      <TableCell align="right">
+                                        {formatCurrency(calculateCPC(network.totals.cost, network.totals.clicks))}
+                                      </TableCell>
+                                      <TableCell align="right">{formatNumber(network.totals.conversions)}</TableCell>
+                                      <TableCell align="right">
+                                        {formatCurrency(calculateCPA(network.totals.cost, network.totals.conversions))}
+                                      </TableCell>
+                                      <TableCell></TableCell> {/* Empty cell for Actions column */}
+                                    </TableRow>
                                   </TableBody>
                                 </Table>
                               </TableContainer>
@@ -628,6 +662,32 @@ function UnifiedDashboard() {
                     <Typography variant="body1" sx={{ p: 2 }}>
                       No networks found for this source system.
                     </Typography>
+                  )}
+                  {/* Source Totals Row */}
+                  {Object.keys(sourceSystem.networks).length > 0 && sourceSystem.totals && (
+                    <TableContainer component={Paper} sx={{ mt: 2, borderTop: '3px solid #23c785' }}>
+                      <Table size="small">
+                        <TableBody>
+                          <TableRow sx={{ '& td': { fontWeight: 'bold', fontSize: '1.1em' } }}>
+                            <TableCell colSpan={2} align="right">{sourceSystem.name} Total:</TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
+                            <TableCell align="right">
+                              {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}
+                            </TableCell>
+                            <TableCell align="right">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}
+                            </TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}
+                            </TableCell>
+                            <TableCell></TableCell> {/* Empty cell for Actions column */}
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   )}
                 </AccordionDetails>
               </Accordion>
