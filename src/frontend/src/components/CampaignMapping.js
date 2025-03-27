@@ -255,23 +255,38 @@ function CampaignMapping() {
 
   // Helper function to handle network input - allow custom values
   const handleNetworkInputChange = (event, newValue) => {
-    // Reverted: Simply set state, ensuring string
-    const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
+    // Only update if newValue is not null/undefined
+    if (newValue !== null && newValue !== undefined) {
+      const valueToSet = String(newValue); // Ensure string
+      console.log("handleNetworkInputChange - Setting state to:", valueToSet); // Keep log for now
+      setCurrentMapping(prev => ({ ...prev, network: valueToSet }));
+    } else {
+      console.log("handleNetworkInputChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
+    }
   };
 
   // Helper function to handle pretty network input - allow custom values
   const handlePrettyNetworkChange = (event, newValue) => {
-    // Reverted: Simply set state, ensuring string
-    const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
+    // Only update if newValue is not null/undefined
+    if (newValue !== null && newValue !== undefined) {
+      const valueToSet = String(newValue); // Ensure string
+      console.log("handlePrettyNetworkChange - Setting state to:", valueToSet); // Keep log for now
+      setCurrentMapping(prev => ({ ...prev, pretty_network: valueToSet }));
+    } else {
+      console.log("handlePrettyNetworkChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
+    }
   };
 
   // Helper function to handle pretty source input - allow custom values
   const handlePrettySourceChange = (event, newValue) => {
-    // Reverted: Simply set state, ensuring string
-    const valueToSet = newValue ? String(newValue) : '';
-    setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
+    // Only update if newValue is not null/undefined
+    if (newValue !== null && newValue !== undefined) {
+      const valueToSet = String(newValue); // Ensure string
+      console.log("handlePrettySourceChange - Setting state to:", valueToSet); // Keep log for now
+      setCurrentMapping(prev => ({ ...prev, pretty_source: valueToSet }));
+    } else {
+      console.log("handlePrettySourceChange - Received null/undefined newValue, NOT updating state."); // Keep log for now
+    }
   };
 
   // Helper function to handle source system input - allow custom values
@@ -287,7 +302,7 @@ function CampaignMapping() {
     const { name, value } = e.target;
     // Only update if there's a value on blur
     if (value) {
-      console.log(`handleBlur - Name: ${name}, Value: ${value}`); // DEBUG LOG
+      // console.log(`handleBlur - Name: ${name}, Value: ${value}`); // Removed DEBUG LOG
       setCurrentMapping(prev => ({ ...prev, [name]: value }));
     }
   };
@@ -588,7 +603,7 @@ function CampaignMapping() {
                     name="network"
                     variant="outlined"
                     fullWidth
-                    onBlur={handleBlur} // Add onBlur handler
+                    // onBlur={handleBlur} // Removed onBlur handler
                   />
                 )}
               />
@@ -608,7 +623,7 @@ function CampaignMapping() {
                     name="pretty_network"
                     variant="outlined"
                     fullWidth
-                    onBlur={handleBlur} // Add onBlur handler
+                    // onBlur={handleBlur} // Removed onBlur handler
                   />
                 )}
               />
@@ -628,7 +643,7 @@ function CampaignMapping() {
                     name="pretty_source"
                     variant="outlined"
                     fullWidth
-                    onBlur={handleBlur} // Add onBlur handler
+                    // onBlur={handleBlur} // Removed onBlur handler
                   />
                 )}
               />
