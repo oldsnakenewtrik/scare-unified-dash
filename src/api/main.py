@@ -668,10 +668,13 @@ async def get_campaign_metrics(
     # Reuse the campaigns-performance endpoint
     return await get_campaigns_performance(start_date, end_date, db)
 
-@app.get("/api/campaign-mappings", tags=["Campaigns"])
-async def get_campaign_mappings(db=Depends(get_db)):
+@app.get("/api/campaign-mappings", response_model=List[CampaignMapping], tags=["Campaigns"]) # Added response_model
+async def get_campaign_mappings(
+    source_system: Optional[str] = Query(None, description="Filter mappings by source system"), # Add query parameter
+    db=Depends(get_db)
+):
     """
-    Get all campaign mappings in the system
+    Get campaign mappings, optionally filtered by source system.
     """
     logger.info("Campaign mappings endpoint called")
     try:
@@ -707,10 +710,22 @@ async def get_campaign_mappings(db=Depends(get_db)):
                 created_at,
                 updated_at
             FROM public.sm_campaign_name_mapping
+            {where_clause} -- Add placeholder for WHERE clause
             ORDER BY display_order, source_system, original_campaign_name -- Order by display_order first
         """)
         
-        result = db.execute(query).fetchall()
+        params = {}
+        where_clause = ""
+        if source_system:
+            # Use case-insensitive comparison for filtering
+            where_clause = "WHERE LOWER(source_system) = LOWER(:source_system)"
+            params["source_system"] = source_system
+            logger.info(f"Filtering campaign mappings by source_system: {source_system}")
+            
+        # Format the query with the potential WHERE clause
+        final_query = query.format(where_clause=where_clause)
+        
+        result = db.execute(text(final_query), params).fetchall() # Execute with params
         
         # Convert to list of dictionaries using column names
         mappings = [dict(row._mapping) for row in result]
