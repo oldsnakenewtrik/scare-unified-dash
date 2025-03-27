@@ -255,21 +255,24 @@ function CampaignMapping() {
 
   // Helper function to handle network input - allow custom values
   const handleNetworkInputChange = (event, newValue) => {
-    console.log("handleNetworkInputChange - newValue:", newValue); // DEBUG LOG
-    // If it's a string (custom value) or a selected item from dropdown
-    setCurrentMapping(prev => ({
-      ...prev,
-      network: newValue
-    }));
+    console.log("handleNetworkInputChange - newValue received:", newValue); // Log received value
+    const valueToSet = newValue; // Store it first
+    setCurrentMapping(prev => {
+      const newState = { ...prev, network: valueToSet };
+      console.log("handleNetworkInputChange - state *after* update:", newState); // Log state after update attempt
+      return newState;
+    });
   };
 
   // Helper function to handle pretty network input - allow custom values
   const handlePrettyNetworkChange = (event, newValue) => {
-    console.log("handlePrettyNetworkChange - newValue:", newValue); // DEBUG LOG
-    setCurrentMapping(prev => ({
-      ...prev,
-      pretty_network: newValue
-    }));
+    console.log("handlePrettyNetworkChange - newValue received:", newValue); // Log received value
+    const valueToSet = newValue; // Store it first
+    setCurrentMapping(prev => {
+      const newState = { ...prev, pretty_network: valueToSet };
+      console.log("handlePrettyNetworkChange - state *after* update:", newState); // Log state after update attempt
+      return newState;
+    });
   };
 
   // Helper function to handle pretty source input - allow custom values
