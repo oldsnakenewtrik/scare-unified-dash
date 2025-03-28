@@ -551,7 +551,7 @@ async def get_campaigns_hierarchical(
                                        WHEN LOWER(m.source_system) LIKE 'redtrack%' THEN 'redtrack'
                                        ELSE 'unknown' -- Avoid matching if source_system is unexpected
                                     END
-            WHERE (:include_archived OR m.is_active = TRUE) {date_filter} -- Include all campaigns if include_archived is TRUE
+            {where_clause} {date_filter} -- Use a placeholder for the entire WHERE clause
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
                 m.source_system,
@@ -581,10 +581,17 @@ async def get_campaigns_hierarchical(
         # Add the include_archived parameter to the params dictionary
         params["include_archived"] = include_archived
         
-        # Replace the placeholder in the base query string
-        final_sql = query_base.format(date_filter=date_filter_sql)
+        # Create the WHERE clause based on include_archived parameter
+        where_clause = "WHERE 1=1" # Always true condition to start
+        if not include_archived:
+            where_clause += " AND m.is_active = TRUE"
+            
+        logger.info(f"Using WHERE clause: {where_clause} with include_archived={include_archived}")
+            
+        # Replace the placeholders in the base query string
+        final_sql = query_base.format(where_clause=where_clause, date_filter=date_filter_sql)
         final_query = text(final_sql)
-
+        
         result = db.execute(final_query, params) # Pass params here
         campaigns = []
 
