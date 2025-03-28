@@ -490,10 +490,15 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Add the missing endpoints that match what the frontend is expecting
-@app.get("/api/campaigns-hierarchical", tags=["Campaigns"])
-async def get_campaigns_hierarchical(db=Depends(get_db)):
+@app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical], tags=["Campaigns"]) # Restore response_model
+async def get_campaigns_hierarchical(
+    start_date: Optional[datetime.date] = Query(None, description="Filter by start date (inclusive)"), # Restore start_date
+    end_date: Optional[datetime.date] = Query(None, description="Filter by end date (inclusive)"),   # Restore end_date
+    # include_archived: Optional[bool] = Query(False, description="Include archived campaigns"), # Keep archived filter commented/removed for now if not needed
+    db=Depends(get_db)
+):
     """
-    Get hierarchical campaign data including metrics 
+    Get hierarchical campaign data including metrics, optionally filtered by date.
     """
     # Debug print to confirm this route is registered
     logger.info("DEBUG: campaigns-hierarchical route was called!")
@@ -511,10 +516,21 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Query campaign data
-        query = text("""
-            SELECT 
-                cm.id, 
+        # Build query parts for date filtering
+        params = {}
+        date_filter_sql = ""
+        if start_date and end_date:
+            # IMPORTANT: Filter on the performance view's date column
+            # Add this condition to the main WHERE clause later
+            date_filter_sql = " AND perf.date BETWEEN :start_date AND :end_date "
+            params["start_date"] = start_date
+            params["end_date"] = end_date
+            logger.info(f"Filtering hierarchical data by date: {start_date} to {end_date}")
+        
+        # Base query string - will append date filter later
+        query_string = """
+            SELECT
+                cm.id,
                 cm.source_system, 
                 cm.external_campaign_id,
                 cm.original_campaign_name,
@@ -543,9 +559,15 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
             -- Restore GROUP BY
             GROUP BY cm.id, cm.source_system, cm.external_campaign_id, cm.original_campaign_name, cm.pretty_campaign_name, cm.campaign_category, cm.campaign_type, cm.network, cm.display_order
             ORDER BY cm.display_order, cm.pretty_campaign_name
-        """)
+        """ # End of base query string
         
-        result = db.execute(query)
+        # Append the date filter SQL to the WHERE clause if applicable
+        # Note: The base query already has WHERE cm.is_active = TRUE
+        final_query_string = query_string.replace("WHERE cm.is_active = TRUE", f"WHERE cm.is_active = TRUE{date_filter_sql}")
+        
+        # Create TextClause and execute with parameters
+        final_query = text(final_query_string)
+        result = db.execute(final_query, params) # Pass params here
         campaigns = []
         
         for row in result:
