@@ -657,20 +657,31 @@ function UnifiedDashboard() {
                       No networks found for this source system.
                     </Typography>
                   )}
-                  {/* Source Totals Row - Moved inside AccordionDetails but after network map */}
+                  {/* Source Totals Row - Aligned with table columns */}
                   {Object.keys(sourceSystem.networks).length > 0 && sourceSystem.totals && (
-                    <Paper sx={{ mt: 2, p: 1, borderTop: '3px solid #23c785', display: 'flex', justifyContent: 'space-around', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mr: 2 }}>{sourceSystem.name} Total:</Typography>
-                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end', flexGrow: 1 }}>
-                        <Box>Imp: {formatNumber(sourceSystem.totals.impressions)}</Box>
-                        <Box>Clicks: {formatNumber(sourceSystem.totals.clicks)}</Box>
-                        <Box>CTR: {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}</Box>
-                        <Box>Cost: {formatCurrency(sourceSystem.totals.cost)}</Box>
-                        <Box>CPC: {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}</Box>
-                        <Box>Conv: {formatNumber(sourceSystem.totals.conversions)}</Box>
-                        <Box>CPA: {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}</Box>
-                      </Box>
-                    </Paper>
+                    <TableContainer component={Paper} sx={{ mt: 2, borderTop: '3px solid #23c785' }}>
+                      <Table size="small">
+                        <TableBody>
+                          <TableRow sx={{ '& td': { fontWeight: 'bold', fontSize: '1.05em' } }}>
+                            <TableCell sx={{ pl: 2 }}>{sourceSystem.name} Total:</TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
+                            <TableCell align="right">
+                              {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}
+                            </TableCell>
+                            <TableCell align="right">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}
+                            </TableCell>
+                            <TableCell align="right">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}
+                            </TableCell>
+                            <TableCell></TableCell> {/* Empty cell for Actions column */}
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   )}
                 </AccordionDetails>
               </Accordion>
