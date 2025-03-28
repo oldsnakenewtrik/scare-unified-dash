@@ -21,17 +21,34 @@ echo "Command: $0"
 echo "Running in Railway environment..."
 echo "Current directory: $(pwd)" # Should be /app if run directly
 
-# Check if DATABASE_URL is provided by Railway
+# Check if DATABASE_URL is provided by Railway, with fallback
 echo "Checking for DATABASE_URL environment variable..."
 if [ -z "$DATABASE_URL" ]; then
-    echo "ERROR: DATABASE_URL environment variable is not set."
-    echo "Please ensure Railway is injecting the DATABASE_URL variable."
-    exit 1
-else
-    # Mask the password part for logging
-    MASKED_URL=$(echo "$DATABASE_URL" | sed -E 's/:[^:]+@/:****@/')
-    echo "DATABASE_URL is set: ${MASKED_URL}"
+    echo "DATABASE_URL is not set. Checking for RAILS_SERVICE_POSTGRES_URL..."
+    if [ -n "$RAILWAY_SERVICE_POSTGRES_URL" ]; then
+        echo "Found RAILS_SERVICE_POSTGRES_URL. Using it as DATABASE_URL."
+        # Construct the full URL if needed (assuming standard format)
+        # NOTE: This assumes user/pass/db name are standard or injected via PGUSER/PGPASSWORD etc.
+        # A more robust solution might need PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+        # For now, let's assume the Python script can handle the base URL or other PG vars
+        # If the Python script needs the full postgresql:// format, construct it here.
+        # Example construction (adjust based on actual needs and available PG vars):
+        # export DATABASE_URL="postgresql://${PGUSER:-postgres}:${PGPASSWORD}@${RAILWAY_SERVICE_POSTGRES_URL}:${PGPORT:-5432}/${PGDATABASE:-railway}"
+        
+        # Simplest approach: Export the base URL and hope Python/psycopg2 uses other PG vars
+        # Or if RAILS_SERVICE_POSTGRES_URL is the *full* URL already:
+        export DATABASE_URL="${RAILWAY_SERVICE_POSTGRES_URL}"
+        echo "Exported DATABASE_URL from RAILS_SERVICE_POSTGRES_URL."
+    else
+        echo "ERROR: Neither DATABASE_URL nor RAILS_SERVICE_POSTGRES_URL is set."
+        echo "Please ensure Railway is injecting database connection variables."
+        exit 1
+    fi
 fi
+
+# Mask the password part for logging (now applied even if fallback was used)
+MASKED_URL=$(echo "$DATABASE_URL" | sed -E 's/(postgresql:\/\/)[^:]+:([^@]+@)/\1****:\2/' | sed -E 's/:[^:]+@/:****@/') # Improved masking
+echo "Using DATABASE_URL: ${MASKED_URL}"
 
 # Define absolute paths for Python scripts (assuming they are still under /app/src/...)
 MAIN_PY="/app/src/data_ingestion/google_ads/main.py"
