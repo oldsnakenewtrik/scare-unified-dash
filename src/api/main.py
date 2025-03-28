@@ -523,27 +523,25 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 cm.campaign_type,
                 cm.network,
                 cm.display_order,
-                -- Aggregate metrics from the performance view
+                -- Restore metrics aggregation
                 COALESCE(SUM(perf.impressions), 0) AS impressions,
                 COALESCE(SUM(perf.clicks), 0) AS clicks,
                 COALESCE(SUM(perf.conversions), 0) AS conversions,
                 COALESCE(SUM(perf.cost), 0) AS cost -- Use 'cost' from the view
             FROM public.sm_campaign_name_mapping cm
-            -- Join with the campaign performance view instead of campaign_fact
+            -- Restore LEFT JOIN with corrected condition
             LEFT JOIN public.sm_campaign_performance perf
-                ON cm.external_campaign_id = perf.campaign_id -- Join on external_id = view's campaign_id
-                AND LOWER(cm.source_system) = LOWER(perf.platform) -- Join on source_system = view's platform
+                ON cm.external_campaign_id = perf.campaign_id
+                -- Corrected JOIN condition for platform/source_system mismatch
+                AND (
+                    (LOWER(cm.source_system) = 'google ads' AND perf.platform = 'google') OR
+                    (LOWER(cm.source_system) = 'bing ads' AND perf.platform = 'bing') OR
+                    (LOWER(cm.source_system) = 'redtrack' AND perf.platform = 'redtrack')
+                    -- Add other mappings if necessary
+                )
             WHERE cm.is_active = TRUE
-            GROUP BY
-                cm.id,
-                cm.source_system, 
-                cm.external_campaign_id,
-                cm.original_campaign_name,
-                cm.pretty_campaign_name,
-                cm.campaign_category,
-                cm.campaign_type,
-                cm.network,
-                cm.display_order
+            -- Restore GROUP BY
+            GROUP BY cm.id, cm.source_system, cm.external_campaign_id, cm.original_campaign_name, cm.pretty_campaign_name, cm.campaign_category, cm.campaign_type, cm.network, cm.display_order
             ORDER BY cm.display_order, cm.pretty_campaign_name
         """)
         

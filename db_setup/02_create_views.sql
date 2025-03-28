@@ -3,7 +3,7 @@
 -- Create a basic unified view for ad metrics
 CREATE OR REPLACE VIEW public.sm_unified_ads_metrics AS
 SELECT
-    'google' as platform, -- Simplified platform name
+    'google' as platform, -- Revert to lowercase
     g.network as network,
     g.date,
     TRIM(g.campaign_id::TEXT) as campaign_id, -- Trim and Cast to TEXT
@@ -32,7 +32,7 @@ LEFT JOIN
 UNION ALL
 
 SELECT
-    'bing' as platform, -- Simplified platform name
+    'bing' as platform, -- Revert to lowercase
     b.network as network,
     b.date,
     TRIM(b.campaign_id::TEXT) as campaign_id, -- Trim and Cast to TEXT
