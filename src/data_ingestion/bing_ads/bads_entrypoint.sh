@@ -90,8 +90,14 @@ echo "Found Bing Ads Python script."
 echo "========== COMMAND EXECUTION START =========="
 set -x # Enable command tracing
 
-# Pass the argument ($1, e.g., 'schedule') to the python script
-python ${BING_ADS_MAIN_PY} "$1" # Pass the first argument directly
+# Only pass arguments to main.py if they exist (e.g., for backfill)
+if [ -n "$1" ]; then
+    # Pass all arguments ($@) if provided
+    python ${BING_ADS_MAIN_PY} "$@"
+else
+    # Run main.py without arguments for default schedule mode
+    python ${BING_ADS_MAIN_PY}
+fi
 
 RESULT=$?
 set +x # Disable command tracing
