@@ -16,7 +16,7 @@ echo "============ $(date) ============"
 env | grep -v PASSWORD | grep -v SECRET | grep -v TOKEN | sort
 
 echo "Started at: $(date)"
-echo "Args: $@"
+echo "Args: $@" # Check if 'schedule' appears here
 echo "Command: $0"
 echo "Running in Railway environment..."
 echo "Current directory: $(pwd)" # Should be /app
@@ -24,26 +24,49 @@ echo "Current directory: $(pwd)" # Should be /app
 # Check if DATABASE_URL is provided by Railway, with fallback
 echo "Checking for DATABASE_URL environment variable..."
 if [ -z "$DATABASE_URL" ]; then
-    echo "DATABASE_URL is not set. Checking for RAILS_SERVICE_POSTGRES_URL..."
-    if [ -n "$RAILWAY_SERVICE_POSTGRES_URL" ]; then
-        echo "Found RAILS_SERVICE_POSTGRES_URL. Using it as DATABASE_URL."
-        # Export the URL provided by Railway. Assumes it's the full connection string or Python handles PG vars.
-        export DATABASE_URL="${RAILWAY_SERVICE_POSTGRES_URL}"
-        echo "Exported DATABASE_URL from RAILS_SERVICE_POSTGRES_URL."
-    else
-        echo "ERROR: Neither DATABASE_URL nor RAILS_SERVICE_POSTGRES_URL is set."
-        echo "Please ensure Railway is injecting database connection variables."
-        exit 1
+    echo "DATABASE_URL is not set. Checking for fallback variables..."
+    # Use PGHOST if available, otherwise fallback to RAILS_SERVICE_POSTGRES_URL
+    DB_HOST="${PGHOST:-$RAILWAY_SERVICE_POSTGRES_URL}"
+    DB_PORT="${PGPORT:-5432}"
+    DB_NAME="${PGDATABASE:-railway}" # Default Railway DB name
+    DB_USER="${PGUSER:-postgres}" # Default Railway user
+    # IMPORTANT: PGPASSWORD *must* be set for this to work
+    if [ -z "$DB_HOST" ]; then
+         echo "ERROR: Neither DATABASE_URL nor PGHOST/RAILS_SERVICE_POSTGRES_URL is set."
+         exit 1
+    fi
+    if [ -z "$PGPASSWORD" ]; then
+         echo "ERROR: PGPASSWORD is not set. Cannot construct fallback DATABASE_URL."
+         exit 1
+    fi
+    
+    echo "Constructing DATABASE_URL from PG* variables and fallback host..."
+    export DATABASE_URL="postgresql://${DB_USER}:${PGPASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    echo "Exported fallback DATABASE_URL."
+
+else
+    echo "DATABASE_URL was already set."
+    # Ensure it starts with postgresql:// for SQLAlchemy
+    if [[ "$DATABASE_URL" != postgresql://* ]]; then
+        echo "Warning: DATABASE_URL does not start with postgresql://. Attempting to fix..."
+        # Basic fix assuming postgres:// prefix
+        FIXED_URL=$(echo "$DATABASE_URL" | sed 's/^postgres:\/\//postgresql:\/\//')
+        if [[ "$FIXED_URL" == postgresql://* ]]; then
+            export DATABASE_URL="$FIXED_URL"
+            echo "Fixed DATABASE_URL prefix."
+        else
+            echo "ERROR: Could not fix DATABASE_URL prefix. Original value: $DATABASE_URL"
+            exit 1
+        fi
     fi
 fi
 
-# Mask the password part for logging (now applied even if fallback was used)
+# Mask the password part for logging
 MASKED_URL=$(echo "$DATABASE_URL" | sed -E 's/(postgresql:\/\/)[^:]+:([^@]+@)/\1****:\2/' | sed -E 's/:[^:]+@/:****@/') # Improved masking
 echo "Using DATABASE_URL: ${MASKED_URL}"
 
 
-# Define absolute paths for Python scripts (Updated based on previous errors)
-# Assuming scripts are directly under /app now
+# Define absolute paths for Python scripts
 MAIN_PY="/app/main.py"
 FETCH_PY="/app/fetch_only.py"
 IMPORT_PY="/app/import_from_json.py"
@@ -52,14 +75,10 @@ IMPORT_PY="/app/import_from_json.py"
 echo "Checking for Python script at $MAIN_PY..."
 if [ ! -f "$MAIN_PY" ]; then
    echo "ERROR: Cannot find main python script at $MAIN_PY"
-   # Let's list /app contents for debugging if main.py is missing
    echo "--- ls -la /app ---"
    ls -la /app
    exit 1
 fi
-# Add checks for other scripts if they are essential for all modes
-# if [ ! -f "$FETCH_PY" ]; then echo "ERROR: Cannot find fetch script at $FETCH_PY"; exit 1; fi
-# if [ ! -f "$IMPORT_PY" ]; then echo "ERROR: Cannot find import script at $IMPORT_PY"; exit 1; fi
 
 echo "Using main script: ${MAIN_PY}"
 
