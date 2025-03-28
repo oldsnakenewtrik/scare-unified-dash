@@ -128,7 +128,7 @@ function UnifiedDashboard() {
         // If showing archived, include all campaigns
         if (showArchived) return true;
         // Otherwise only include active campaigns (not archived)
-        return campaign.is_active !== false;
+        return campaign?.is_active === true; // Strict comparison to ensure only active campaigns
       });
       console.log(`Data after filtering (showArchived=${showArchived}):`, filteredData); // Log data *after* filtering
       
