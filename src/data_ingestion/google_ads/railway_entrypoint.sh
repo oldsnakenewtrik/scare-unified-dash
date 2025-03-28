@@ -42,22 +42,17 @@ find . -name "*.py" -exec cp {} /tmp/google_ads_scripts/ \; || echo "Failed to c
 echo "Contents of fallback directory:"
 ls -la /tmp/google_ads_scripts
 
-# Attempt to construct DATABASE_URL directly using expected internal values
-# Assuming PGPASSWORD might still be injected, but others are not.
-echo "Attempting to construct DATABASE_URL using internal defaults..."
-INTERNAL_HOST="postgres.railway.internal"
-INTERNAL_PORT="5432"
-INTERNAL_DB="railway" # Default Railway DB name, adjust if different
-INTERNAL_USER="${PGUSER:-postgres}" # Use PGUSER if set, else default to postgres
-
-if [ -z "$PGPASSWORD" ]; then
-    echo "ERROR: PGPASSWORD environment variable is not set. Cannot construct DB URL."
+# Check if DATABASE_URL is provided by Railway
+echo "Checking for DATABASE_URL environment variable..."
+if [ -z "$DATABASE_URL" ]; then
+    echo "ERROR: DATABASE_URL environment variable is not set."
+    echo "Please ensure Railway is injecting the DATABASE_URL variable."
     exit 1
+else
+    # Mask the password part for logging
+    MASKED_URL=$(echo "$DATABASE_URL" | sed -E 's/:[^:]+@/:****@/')
+    echo "DATABASE_URL is set: ${MASKED_URL}"
 fi
-
-# Construct and export the URL
-export DATABASE_URL="postgresql://${INTERNAL_USER}:${PGPASSWORD}@${INTERNAL_HOST}:${INTERNAL_PORT}/${INTERNAL_DB}"
-echo "Constructed and exported DATABASE_URL: postgresql://${INTERNAL_USER}:****@${INTERNAL_HOST}:${INTERNAL_PORT}/${INTERNAL_DB}"
 
 # Optional: Add a quick connection test here if needed, but main.py should handle it
 # python -c "import os, sqlalchemy; sqlalchemy.create_engine(os.environ['DATABASE_URL']).connect().close(); print('Quick DB connection test successful.')" || exit 1
