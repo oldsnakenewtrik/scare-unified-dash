@@ -14,6 +14,8 @@ import yaml
 from pathlib import Path
 from sqlalchemy import text
 import requests
+import traceback # Already used later, ensure it's here
+from google.auth.exceptions import RefreshError # For catching token errors
 
 # Set up logging
 logging.basicConfig(
@@ -80,6 +82,29 @@ def get_db_engine():
 
 # Create engine
 engine = get_db_engine()
+
+def update_system_status(key, value):
+    """Updates a key-value pair in the system_status table."""
+    if not engine:
+        logger.error("Cannot update system status, database engine not available.")
+        return
+    
+    try:
+        with engine.connect() as conn:
+            # Use INSERT ... ON CONFLICT DO UPDATE (Upsert)
+            stmt = text("""
+                INSERT INTO public.system_status (status_key, status_value, updated_at)
+                VALUES (:key, :value, NOW())
+                ON CONFLICT (status_key) DO UPDATE
+                SET status_value = EXCLUDED.status_value,
+                    updated_at = NOW();
+            """)
+            conn.execute(stmt, {'key': key, 'value': value})
+            logger.info(f"System status updated: {key} = {value}")
+    except Exception as e:
+        logger.error(f"Failed to update system status for key '{key}': {str(e)}")
+        # Log traceback for detailed debugging
+        logger.error(traceback.format_exc())
 
 def get_google_ads_client():
     """Get a Google Ads API client."""
@@ -181,11 +206,20 @@ def get_google_ads_client():
                 continue
         
         logger.error("Failed to create Google Ads client with any API version")
+        # Update status if client creation failed potentially due to auth
+        update_system_status('google_ads_auth_status', 'error: client creation failed')
+        return None
+    except RefreshError as re:
+        # Specific error for refresh token issues
+        logger.error(f"Google Ads Refresh Token Error: {str(re)}")
+        logger.error(traceback.format_exc())
+        update_system_status('google_ads_auth_status', 'error: refresh token invalid')
         return None
     except Exception as e:
         logger.error(f"Error creating Google Ads client: {str(e)}")
-        import traceback
         logger.error(traceback.format_exc())
+        # Update status for generic errors during client creation
+        update_system_status('google_ads_auth_status', f'error: {str(e)}')
         return None
 
 def get_campaign_dimension_id(campaign_name, source_campaign_id=None):
@@ -386,13 +420,30 @@ def fetch_google_ads_data_rest_fallback(start_date, end_date):
         }
         
         logger.info("Requesting OAuth2 access token...")
-        token_response = requests.post(token_url, data=token_data)
-        if token_response.status_code != 200:
-            logger.error(f"Failed to get access token: {token_response.text}")
+        token_response = None # Initialize for error handling scope
+        try:
+            token_response = requests.post(token_url, data=token_data)
+            token_response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            access_token = token_response.json().get("access_token")
+            if not access_token:
+                logger.error("Access token not found in response.")
+                update_system_status('google_ads_auth_status', 'error: access token missing')
+                return []
+            logger.info("Successfully obtained access token")
+        except requests.exceptions.RequestException as req_err:
+            logger.error(f"Failed to get access token (RequestException): {str(req_err)}")
+            # Check if it's likely a refresh token error (e.g., 400 Bad Request with 'invalid_grant')
+            if token_response and token_response.status_code == 400 and 'invalid_grant' in token_response.text.lower():
+                logger.error("Refresh token appears to be invalid (invalid_grant).")
+                update_system_status('google_ads_auth_status', 'error: refresh token invalid')
+            else:
+                update_system_status('google_ads_auth_status', f'error: token request failed ({str(req_err)})')
             return []
-        
-        access_token = token_response.json().get("access_token")
-        logger.info("Successfully obtained access token")
+        except Exception as e: # Catch other potential errors like JSONDecodeError
+            logger.error(f"Failed to get access token (Other Error): {str(e)}")
+            logger.error(traceback.format_exc())
+            update_system_status('google_ads_auth_status', f'error: token request failed ({str(e)})')
+            return []
         
         # Try different API versions and endpoint formats
         api_versions = ["v11", "v14", "v16", "v18", "v21"]
@@ -1732,34 +1783,62 @@ def run_google_ads_etl(days=7):
     """
     logger.info(f"Starting Google Ads ETL process for the last {days} days...")
     
-    # Calculate date range
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=days)
-    
-    # Format dates as strings
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
-    
-    logger.info(f"Date range: {start_date_str} to {end_date_str}")
-    
-    # Fetch data from Google Ads API (includes REST fallback if gRPC fails)
-    raw_data = fetch_google_ads_data(start_date_str, end_date_str)
-    
-    if not raw_data:
-        logger.warning("No data fetched from Google Ads API")
-        return
-    
-    # Process the data
-    processed_data = process_google_ads_data(raw_data)
-    
-    # Store in database
-    records_affected = store_google_ads_data(processed_data)
-    
-    if records_affected > 0:
-        logger.info(f"Successfully completed Google Ads ETL process, affected {records_affected} records")
-        return True
-    else:
-        logger.warning("No records affected in the database")
+    try: # Add top-level try block
+        # Calculate date range
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        # Format dates as strings
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        logger.info(f"Date range: {start_date_str} to {end_date_str}")
+        
+        # Fetch data from Google Ads API (includes REST fallback if gRPC fails)
+        # Auth errors inside fetch_google_ads_data should update status directly
+        raw_data = fetch_google_ads_data(start_date_str, end_date_str)
+        
+        # If fetch returns None or empty due to non-auth error, we might still be 'ok'
+        # but if it returns None due to auth error caught inside, status is already 'error'
+        if raw_data is None: # Check specifically for None if fetch indicates critical failure
+            logger.error("Fetching Google Ads data failed critically.")
+            # Status should have been set by the failing function
+            return False # Indicate failure
+        elif not raw_data:
+            logger.warning("No data fetched from Google Ads API (might be normal).")
+            # Assume auth is ok if we got here without errors from fetch
+            update_system_status('google_ads_auth_status', 'ok')
+            return True # Indicate process ran, even if no data
+        
+        # Process the data
+        processed_data = process_google_ads_data(raw_data)
+        
+        # Store in database
+        records_affected = store_google_ads_data(processed_data)
+        
+        # Update status on successful completion (even if no records affected)
+        update_system_status('google_ads_auth_status', 'ok')
+        
+        if records_affected > 0:
+            logger.info(f"Successfully completed Google Ads ETL process, affected {records_affected} records")
+            return True # Indicate success
+        else:
+            logger.warning("No records affected in the database, but process completed without auth errors.")
+            return True # Still indicate success as the process ran
+            
+    except RefreshError as re:
+        # Catch RefreshError specifically if it bubbles up here
+        logger.error(f"Google Ads Refresh Token Error during ETL: {str(re)}")
+        logger.error(traceback.format_exc())
+        update_system_status('google_ads_auth_status', 'error: refresh token invalid')
+        return False # Indicate failure
+    except Exception as e:
+        # Catch any other unexpected errors during the ETL process
+        logger.error(f"Unexpected error during Google Ads ETL: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Update status, assuming it might be auth related if not caught earlier
+        update_system_status('google_ads_auth_status', f'error: {str(e)}')
+        return False # Indicate failure
         return False
 
 def backfill_google_ads_data(start_date_str, end_date_str=None):

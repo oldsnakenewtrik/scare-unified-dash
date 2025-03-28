@@ -37,7 +37,6 @@ import traceback
 import json
 import sys
 import time
-import re # Import regex module
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 from dotenv import load_dotenv
@@ -165,24 +164,21 @@ class CampaignHierarchical(BaseModel):
     campaign_category: Optional[str] = None
     campaign_type: Optional[str] = None
     network: Optional[str] = None
-    pretty_network: Optional[str] = None # Added
-    pretty_source: Optional[str] = None  # Added
     display_order: int
-    is_active: bool # Added is_active status
     impressions: Optional[int] = None
     clicks: Optional[int] = None
     conversions: Optional[float] = None
     cost: Optional[float] = None
-
-class CampaignMappingArchive(BaseModel):
-    id: int
-    is_active: bool
 
 class UnmappedCampaign(BaseModel):
     source_system: str
     external_campaign_id: str
     campaign_name: str
     network: Optional[str] = None
+
+class GoogleAdsAuthStatus(BaseModel):
+    status: str = "unknown" # Default to unknown
+    last_checked: Optional[datetime.datetime] = None
 
 # Debug print to verify app initialization
 print("DEBUG: FastAPI app initialized!")
@@ -494,22 +490,16 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Add the missing endpoints that match what the frontend is expecting
-@app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical], tags=["Campaigns"]) # Added response_model
-async def get_campaigns_hierarchical(
-    start_date: Optional[datetime.date] = Query(None, description="Filter by start date (inclusive)"),
-    end_date: Optional[datetime.date] = Query(None, description="Filter by end date (inclusive)"),
-    include_archived: Optional[bool] = Query(False, description="Include archived campaigns"),
-    db=Depends(get_db)
-):
+@app.get("/api/campaigns-hierarchical", tags=["Campaigns"])
+async def get_campaigns_hierarchical(db=Depends(get_db)):
     """
-    Get hierarchical campaign data including aggregated metrics, optionally filtered by date.
+    Get hierarchical campaign data including metrics 
     """
     # Debug print to confirm this route is registered
     logger.info("DEBUG: campaigns-hierarchical route was called!")
     
     try:
         logger.info("Fetching hierarchical campaign data")
-        logger.info(f"Include archived: {include_archived}")
         
         # Check if sm_campaign_name_mapping table exists
         try:
@@ -521,80 +511,42 @@ async def get_campaigns_hierarchical(
             logger.error(f"Error checking public.sm_campaign_name_mapping table: {str(e)}") # Corrected log message
             return {"error": f"Database error: public.sm_campaign_name_mapping table may not exist. {str(e)}", "status": "error"} # Corrected error message
         
-        # Define base query string with placeholder for date filter
-        query_base = """
-            SELECT
-                m.id,
-                m.source_system, -- Use source_system from mapping table
-                m.external_campaign_id,
-                m.original_campaign_name,
-                m.pretty_campaign_name,
-                m.campaign_category,
-                m.campaign_type,
-                m.network, -- Use network from mapping table
-                m.pretty_network,
-                m.pretty_source,
-                m.display_order,
-                m.is_active, -- Added is_active
-                -- Use COALESCE around SUM for safety
-                COALESCE(SUM(perf.impressions), 0) AS impressions,
-                COALESCE(SUM(perf.clicks), 0) AS clicks,
-                COALESCE(SUM(perf.conversions), 0) AS conversions,
-                COALESCE(SUM(perf.cost), 0) AS cost
-            FROM public.sm_campaign_name_mapping m -- Start with mapping table
-            LEFT JOIN public.sm_campaign_performance perf -- LEFT JOIN to performance view
-                -- Force TEXT type and 'C' collation for robust comparison
-                ON (TRIM(m.external_campaign_id)::TEXT COLLATE "C") = (perf.campaign_id COLLATE "C") -- campaign_id is already trimmed TEXT from view
-                AND perf.platform = CASE -- Match simplified platform name based on mapping source_system
-                                       WHEN LOWER(m.source_system) LIKE 'google%' THEN 'google'
-                                       WHEN LOWER(m.source_system) LIKE 'bing%' THEN 'bing'
-                                       WHEN LOWER(m.source_system) LIKE 'redtrack%' THEN 'redtrack'
-                                       ELSE 'unknown' -- Avoid matching if source_system is unexpected
-                                    END
-            {where_clause} {date_filter} -- Use a placeholder for the entire WHERE clause
-            GROUP BY
-                m.id, -- Group by all columns from the mapping table
-                m.source_system,
-                m.external_campaign_id,
-                m.original_campaign_name,
-                m.pretty_campaign_name,
-                m.campaign_category,
-                m.campaign_type,
-                m.network,
-                m.pretty_network,
-                m.pretty_source,
-                m.display_order,
-                m.is_active -- Added is_active to GROUP BY
-            ORDER BY m.display_order, m.pretty_campaign_name
-        """
-
-        params = {}
-        date_filter_sql = "" # Use a different variable name for the SQL part
-        # Add date filtering if start_date and end_date are provided
-        if start_date and end_date:
-            # Add the date condition and parameters
-            date_filter_sql = " AND perf.date BETWEEN :start_date AND :end_date"
-            params["start_date"] = start_date
-            params["end_date"] = end_date
-            logger.info(f"Filtering hierarchical data by date: {start_date} to {end_date}")
-
-        # Add the include_archived parameter to the params dictionary
-        params["include_archived"] = include_archived
+        # Query campaign data
+        query = text("""
+            SELECT 
+                cm.id, 
+                cm.source_system, 
+                cm.external_campaign_id,
+                cm.original_campaign_name,
+                cm.pretty_campaign_name,
+                cm.campaign_category,
+                cm.campaign_type,
+                cm.network,
+                cm.display_order,
+                COALESCE(SUM(cf.impressions), 0) AS impressions,
+                COALESCE(SUM(cf.clicks), 0) AS clicks,
+                COALESCE(SUM(cf.conversions), 0) AS conversions,
+                COALESCE(SUM(cf.spend), 0) AS cost
+            FROM public.sm_campaign_name_mapping cm # Corrected table name
+            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id
+                AND cm.source_system = cf.source_system
+            WHERE cm.is_active = TRUE
+            GROUP BY 
+                cm.id, 
+                cm.source_system, 
+                cm.external_campaign_id,
+                cm.original_campaign_name,
+                cm.pretty_campaign_name,
+                cm.campaign_category,
+                cm.campaign_type,
+                cm.network,
+                cm.display_order
+            ORDER BY cm.display_order, cm.pretty_campaign_name
+        """)
         
-        # Create the WHERE clause based on include_archived parameter
-        where_clause = "WHERE 1=1" # Always true condition to start
-        if not include_archived:
-            where_clause += " AND m.is_active = TRUE"
-            
-        logger.info(f"Using WHERE clause: {where_clause} with include_archived={include_archived}")
-            
-        # Replace the placeholders in the base query string
-        final_sql = query_base.format(where_clause=where_clause, date_filter=date_filter_sql)
-        final_query = text(final_sql)
-        
-        result = db.execute(final_query, params) # Pass params here
+        result = db.execute(query)
         campaigns = []
-
+        
         for row in result:
             campaign = {
                 "id": row.id,
@@ -605,20 +557,17 @@ async def get_campaigns_hierarchical(
                 "campaign_category": row.campaign_category,
                 "campaign_type": row.campaign_type,
                 "network": row.network,
-                "pretty_network": row.pretty_network,
-                "pretty_source": row.pretty_source,
                 "display_order": row.display_order,
-                "is_active": row.is_active, # Added is_active
                 "impressions": row.impressions,
                 "clicks": row.clicks,
                 "conversions": float(row.conversions) if row.conversions else 0,
                 "cost": float(row.cost) if row.cost else 0
             }
             campaigns.append(campaign)
-
+        
         logger.info(f"Returning {len(campaigns)} campaign records from hierarchical endpoint")
         return campaigns
-
+        
     except SQLAlchemyError as e:
         error_msg = f"Database error fetching hierarchical campaign data: {str(e)}"
         logger.error(error_msg)
@@ -645,20 +594,20 @@ async def get_campaigns_performance(
         
         # Query campaign performance data
         query = text("""
-            SELECT
-                uam.campaign_id,      -- Use uam alias
-                uam.campaign_name,    -- Use uam alias
-                uam.platform AS source_system, -- Use uam alias (platform is the correct name in view)
-                uam.date,             -- Use uam alias
-                uam.impressions,      -- Use uam alias
-                uam.clicks,           -- Use uam alias
-                uam.cost AS spend,    -- Use uam alias (cost is the name in view)
-                0 AS revenue,         -- Placeholder for revenue if not in view
-                uam.conversions,      -- Use uam alias
-                CASE WHEN uam.clicks > 0 THEN uam.cost / uam.clicks ELSE 0 END AS cpc -- Use uam alias
-            FROM public.sm_unified_ads_metrics uam -- Use the unified view
-            WHERE uam.date BETWEEN :start_date AND :end_date
-            ORDER BY uam.date DESC, uam.campaign_name -- Use view columns for ordering
+            SELECT 
+                cf.campaign_id,
+                cf.campaign_name,
+                cf.source_system,
+                cf.date,
+                cf.impressions,
+                cf.clicks,
+                cf.spend,
+                cf.revenue,
+                cf.conversions,
+                CASE WHEN cf.clicks > 0 THEN cf.spend / cf.clicks ELSE 0 END AS cpc
+            FROM campaign_fact cf
+            WHERE cf.date BETWEEN :start_date AND :end_date
+            ORDER BY cf.date DESC, cf.campaign_name
         """)
         
         result = db.execute(query, {
@@ -709,13 +658,10 @@ async def get_campaign_metrics(
     # Reuse the campaigns-performance endpoint
     return await get_campaigns_performance(start_date, end_date, db)
 
-@app.get("/api/campaign-mappings", response_model=List[CampaignMapping], tags=["Campaigns"]) # Added response_model
-async def get_campaign_mappings(
-    source_system: Optional[str] = Query(None, description="Filter mappings by source system"), # Add query parameter
-    db=Depends(get_db)
-):
+@app.get("/api/campaign-mappings", tags=["Campaigns"])
+async def get_campaign_mappings(db=Depends(get_db)):
     """
-    Get campaign mappings, optionally filtered by source system.
+    Get all campaign mappings in the system
     """
     logger.info("Campaign mappings endpoint called")
     try:
@@ -733,31 +679,28 @@ async def get_campaign_mappings(
             logger.warning("Campaign mappings table does not exist")
             return []
             
-        # Define base query parts without placeholders or initial ORDER BY
-        select_from_clause = """
+        # Query all mappings, including all relevant fields
+        query = text("""
             SELECT
-                id, source_system, external_campaign_id, original_campaign_name,
-                pretty_campaign_name, campaign_category, campaign_type, network,
-                pretty_network, pretty_source, display_order, is_active,
-                created_at, updated_at
+                id,
+                source_system,
+                external_campaign_id,
+                original_campaign_name, -- Use original name from table
+                pretty_campaign_name,
+                campaign_category,
+                campaign_type,
+                network,
+                pretty_network,
+                pretty_source,
+                display_order,
+                is_active,
+                created_at,
+                updated_at
             FROM public.sm_campaign_name_mapping
-        """
-        order_clause = " ORDER BY display_order, source_system, original_campaign_name" # Define ORDER BY separately
-
-        params = {}
-        where_clause = ""
-        # Conditionally build WHERE clause string
-        if source_system:
-            where_clause = " WHERE LOWER(source_system) = LOWER(:source_system)"
-            params["source_system"] = source_system
-            logger.info(f"Filtering campaign mappings by source_system: {source_system}")
-
-        # Combine parts into final SQL string
-        sql_string = select_from_clause + where_clause + order_clause
-
-        # Create TextClause from the final string and execute
-        final_query = text(sql_string)
-        result = db.execute(final_query, params).fetchall()
+            ORDER BY display_order, source_system, original_campaign_name -- Order by display_order first
+        """)
+        
+        result = db.execute(query).fetchall()
         
         # Convert to list of dictionaries using column names
         mappings = [dict(row._mapping) for row in result]
@@ -806,21 +749,21 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
                 FROM public.sm_fact_google_ads 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION
+                UNION ALL
                 
                 SELECT DISTINCT 'Bing Ads' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name
                 FROM public.sm_fact_bing_ads 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION
+                UNION ALL
                 
                 SELECT DISTINCT 'Matomo' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name 
                 FROM public.sm_fact_matomo 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION
+                UNION ALL
                 
                 SELECT DISTINCT 'RedTrack' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name
@@ -871,8 +814,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 campaign_category,
                 campaign_type,
                 network,
-                pretty_network,  -- Removed invalid comment
-                pretty_source,   -- Removed invalid comment
+                pretty_network,
+                pretty_source,
                 display_order,
                 is_active
             ) VALUES (
@@ -883,8 +826,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
                 :campaign_category,
                 :campaign_type,
                 :network,
-                :pretty_network,  -- Removed invalid comment
-                :pretty_source,   -- Removed invalid comment
+                :pretty_network,
+                :pretty_source,
                 :display_order,
                 TRUE
             )
@@ -900,8 +843,8 @@ async def create_campaign_mapping(mapping: CampaignMappingCreate, db=Depends(get
             "campaign_category": mapping.campaign_category,
             "campaign_type": mapping.campaign_type,
             "network": mapping.network,
-            "pretty_network": mapping.pretty_network,
-            "pretty_source": mapping.pretty_source,
+            "pretty_network": mapping.pretty_network, # Re-added
+            "pretty_source": mapping.pretty_source,   # Re-added
             "display_order": mapping.display_order or 999 # Default display_order
         }
 
@@ -979,56 +922,7 @@ async def delete_campaign_mapping(mapping_id: int, db=Depends(get_db)):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
-# Endpoint to Archive/Unarchive Mappings
-@app.post("/api/campaign-mappings/archive", status_code=status.HTTP_200_OK, tags=["Campaigns"])
-async def archive_campaign_mapping(archive_data: CampaignMappingArchive, db=Depends(get_db)):
-    """
-    Archive or unarchive a campaign mapping by setting its is_active status.
-    """
-    logger.info(f"Setting is_active={archive_data.is_active} for campaign mapping ID: {archive_data.id}")
-    try:
-        # Check if the mapping exists first
-        check_query = text("SELECT id FROM public.sm_campaign_name_mapping WHERE id = :id")
-        existing = db.execute(check_query, {"id": archive_data.id}).fetchone()
 
-        if not existing:
-            logger.warning(f"Campaign mapping with ID {archive_data.id} not found for archive/unarchive.")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Campaign mapping with ID {archive_data.id} not found")
-
-        # Execute the update operation
-        update_query = text("""
-            UPDATE public.sm_campaign_name_mapping
-            SET is_active = :is_active, updated_at = CURRENT_TIMESTAMP
-            WHERE id = :id
-        """)
-        result = db.execute(update_query, {"id": archive_data.id, "is_active": archive_data.is_active})
-
-        # Verify update
-        if result.rowcount == 0:
-            logger.error(f"Failed to update is_active status for campaign mapping ID {archive_data.id}.")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update campaign mapping status.")
-
-        db.commit()
-        logger.info(f"Successfully set is_active={archive_data.is_active} for campaign mapping ID: {archive_data.id}")
-        return {"message": f"Campaign mapping {archive_data.id} status set to is_active={archive_data.is_active}"}
-
-    except HTTPException:
-        db.rollback()
-        raise
-    except SQLAlchemyError as e:
-        db.rollback()
-        error_msg = f"Database error updating campaign mapping ID {archive_data.id}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
-    except Exception as e:
-        db.rollback()
-        error_msg = f"Unexpected error updating campaign mapping ID {archive_data.id}: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
-
-# Endpoint to Update Campaign Display Order (Corrected Indentation)
 @app.post("/api/campaign-order", tags=["Campaigns"])
 async def update_campaign_order(orders: List[CampaignOrderUpdate], db=Depends(get_db)):
     """
@@ -1492,6 +1386,39 @@ def reconnect_database():
                 "error_id": error_id
             }
         )
+
+@app.get("/api/status/google-ads-auth", response_model=GoogleAdsAuthStatus, tags=["Status"])
+async def get_google_ads_auth_status(db=Depends(get_db)):
+    """
+    Get the current status of the Google Ads authentication based on the last ETL run.
+    Status can be 'ok', 'error: ...', or 'unknown'.
+    """
+    status_key = 'google_ads_auth_status'
+    try:
+        query = text("""
+            SELECT status_value, updated_at
+            FROM public.system_status
+            WHERE status_key = :key
+        """)
+        result = db.execute(query, {'key': status_key}).fetchone()
+        
+        if result:
+            return GoogleAdsAuthStatus(status=result.status_value, last_checked=result.updated_at)
+        else:
+            # If the key doesn't exist yet, return unknown status
+            logger.warning(f"Status key '{status_key}' not found in system_status table.")
+            return GoogleAdsAuthStatus(status="unknown", last_checked=None)
+            
+    except SQLAlchemyError as e:
+        # Use the consistent error handler
+        logger.error(f"Database error fetching status for key '{status_key}': {str(e)}")
+        # Return a 500 error, but maybe indicate status is unknown due to DB error
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Database error fetching Google Ads auth status: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error fetching status for key '{status_key}': {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Unexpected error fetching Google Ads auth status: {str(e)}")
 
 # Root endpoint for quick testing
 @app.get("/", tags=["Root"])
