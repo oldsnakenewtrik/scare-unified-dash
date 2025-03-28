@@ -134,4 +134,11 @@ echo "Check log files at: ${LOGFILE} and ${ETL_LOGFILE}"
 echo "Also check diagnostic logs: /tmp/entrypoint_start.log and /tmp/entrypoint_stderr.log"
 echo "========== RAILWAY ENTRYPOINT SCRIPT END (Main Log) =========="
 
+# Attempt to output diagnostic logs to main stdout before exiting
+echo "--- Attempting to dump /tmp/entrypoint_start.log ---"
+cat /tmp/entrypoint_start.log || echo "Failed to cat /tmp/entrypoint_start.log"
+echo "--- Attempting to dump /tmp/entrypoint_stderr.log ---"
+cat /tmp/entrypoint_stderr.log || echo "Failed to cat /tmp/entrypoint_stderr.log"
+echo "--- Diagnostic dump finished ---"
+
 set +x # Disable tracing at the very end
