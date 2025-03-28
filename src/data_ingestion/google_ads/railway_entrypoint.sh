@@ -139,5 +139,13 @@ else
 fi
 
 echo "Script completed at: $(date)"
+echo "========== RAILWAY ENTRYPOINT SCRIPT END =========="
+
+>>>>>>> Stashed changes
+=======
 echo "Check log files at: ${LOGFILE} and ${ETL_LOGFILE}"
 echo "========== RAILWAY ENTRYPOINT SCRIPT END (/app/railway_entrypoint.sh) =========="
+=======
+echo "========== RAILWAY ENTRYPOINT SCRIPT END =========="
+
+>>>>>>> Stashed changes
