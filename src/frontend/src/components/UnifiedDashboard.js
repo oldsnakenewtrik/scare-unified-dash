@@ -660,24 +660,25 @@ function UnifiedDashboard() {
                   {/* Source Totals Row - Aligned with table columns */}
                   {Object.keys(sourceSystem.networks).length > 0 && sourceSystem.totals && (
                     <TableContainer component={Paper} sx={{ mt: 2, borderTop: '3px solid #23c785' }}>
-                      <Table size="small">
+                      <Table>
                         <TableBody>
                           <TableRow sx={{ '& td': { fontWeight: 'bold', fontSize: '1.05em' } }}>
-                            <TableCell sx={{ pl: 2 }}>{sourceSystem.name} Total:</TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
-                            <TableCell align="right">
+                            <TableCell width="5%"></TableCell>
+                            <TableCell width="30%">{sourceSystem.name} Total:</TableCell>
+                            <TableCell align="right" width="10%">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
+                            <TableCell align="right" width="10%">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
+                            <TableCell align="right" width="10%">
                               {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}
                             </TableCell>
-                            <TableCell align="right">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
-                            <TableCell align="right">
+                            <TableCell align="right" width="10%">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
+                            <TableCell align="right" width="10%">
                               {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}
                             </TableCell>
-                            <TableCell align="right">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
-                            <TableCell align="right">
+                            <TableCell align="right" width="5%">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
+                            <TableCell align="right" width="5%">
                               {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}
                             </TableCell>
-                            <TableCell></TableCell> {/* Empty cell for Actions column */}
+                            <TableCell align="right" width="5%"></TableCell> {/* Empty cell for Actions column */}
                           </TableRow>
                         </TableBody>
                       </Table>
