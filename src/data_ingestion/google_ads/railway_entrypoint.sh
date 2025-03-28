@@ -19,7 +19,7 @@ echo "Started at: $(date)"
 echo "Args: $@"
 echo "Command: $0"
 echo "Running in Railway environment..."
-echo "Current directory: $(pwd)" # Should be /app if run directly
+echo "Current directory: $(pwd)" # Should be /app
 
 # Check if DATABASE_URL is provided by Railway, with fallback
 echo "Checking for DATABASE_URL environment variable..."
@@ -27,16 +27,7 @@ if [ -z "$DATABASE_URL" ]; then
     echo "DATABASE_URL is not set. Checking for RAILS_SERVICE_POSTGRES_URL..."
     if [ -n "$RAILWAY_SERVICE_POSTGRES_URL" ]; then
         echo "Found RAILS_SERVICE_POSTGRES_URL. Using it as DATABASE_URL."
-        # Construct the full URL if needed (assuming standard format)
-        # NOTE: This assumes user/pass/db name are standard or injected via PGUSER/PGPASSWORD etc.
-        # A more robust solution might need PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
-        # For now, let's assume the Python script can handle the base URL or other PG vars
-        # If the Python script needs the full postgresql:// format, construct it here.
-        # Example construction (adjust based on actual needs and available PG vars):
-        # export DATABASE_URL="postgresql://${PGUSER:-postgres}:${PGPASSWORD}@${RAILWAY_SERVICE_POSTGRES_URL}:${PGPORT:-5432}/${PGDATABASE:-railway}"
-        
-        # Simplest approach: Export the base URL and hope Python/psycopg2 uses other PG vars
-        # Or if RAILS_SERVICE_POSTGRES_URL is the *full* URL already:
+        # Export the URL provided by Railway. Assumes it's the full connection string or Python handles PG vars.
         export DATABASE_URL="${RAILWAY_SERVICE_POSTGRES_URL}"
         echo "Exported DATABASE_URL from RAILS_SERVICE_POSTGRES_URL."
     else
@@ -50,14 +41,20 @@ fi
 MASKED_URL=$(echo "$DATABASE_URL" | sed -E 's/(postgresql:\/\/)[^:]+:([^@]+@)/\1****:\2/' | sed -E 's/:[^:]+@/:****@/') # Improved masking
 echo "Using DATABASE_URL: ${MASKED_URL}"
 
-# Define absolute paths for Python scripts (assuming they are still under /app/src/...)
-MAIN_PY="/app/src/data_ingestion/google_ads/main.py"
-FETCH_PY="/app/src/data_ingestion/google_ads/fetch_only.py"
-IMPORT_PY="/app/src/data_ingestion/google_ads/import_from_json.py"
+
+# Define absolute paths for Python scripts (Updated based on previous errors)
+# Assuming scripts are directly under /app now
+MAIN_PY="/app/main.py"
+FETCH_PY="/app/fetch_only.py"
+IMPORT_PY="/app/import_from_json.py"
 
 # Check if python files exist before trying to run them
+echo "Checking for Python script at $MAIN_PY..."
 if [ ! -f "$MAIN_PY" ]; then
    echo "ERROR: Cannot find main python script at $MAIN_PY"
+   # Let's list /app contents for debugging if main.py is missing
+   echo "--- ls -la /app ---"
+   ls -la /app
    exit 1
 fi
 # Add checks for other scripts if they are essential for all modes
