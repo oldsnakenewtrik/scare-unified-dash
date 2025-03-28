@@ -25,22 +25,26 @@ echo "Current directory: $(pwd)" # Should be /app
 echo "Checking for DATABASE_URL environment variable..."
 if [ -z "$DATABASE_URL" ]; then
     echo "DATABASE_URL is not set. Checking for fallback variables..."
-    # Use PGHOST if available, otherwise fallback to RAILS_SERVICE_POSTGRES_URL
-    DB_HOST="${PGHOST:-$RAILWAY_SERVICE_POSTGRES_URL}"
+    # Prioritize RAILS_SERVICE_POSTGRES_URL for hostname, then PGHOST
+    DB_HOST_FROM_RAILWAY="${RAILWAY_SERVICE_POSTGRES_URL}" # This seems to be just the host
+    DB_HOST="${DB_HOST_FROM_RAILWAY:-$PGHOST}" # Use Railway-provided host first
+
     DB_PORT="${PGPORT:-5432}"
     DB_NAME="${PGDATABASE:-railway}" # Default Railway DB name
     DB_USER="${PGUSER:-postgres}" # Default Railway user
-    # IMPORTANT: PGPASSWORD *must* be set for this to work
+
     if [ -z "$DB_HOST" ]; then
-         echo "ERROR: Neither DATABASE_URL nor PGHOST/RAILS_SERVICE_POSTGRES_URL is set."
+         echo "ERROR: Cannot determine DB host (checked RAILS_SERVICE_POSTGRES_URL and PGHOST)."
          exit 1
     fi
     if [ -z "$PGPASSWORD" ]; then
+         # Re-check if PGPASSWORD was explicitly set in Railway Variables for this service
          echo "ERROR: PGPASSWORD is not set. Cannot construct fallback DATABASE_URL."
+         echo "Ensure PGPASSWORD is set in the Railway service variables."
          exit 1
     fi
-    
-    echo "Constructing DATABASE_URL from PG* variables and fallback host..."
+
+    echo "Constructing DATABASE_URL from fallback variables (Host: $DB_HOST)..."
     export DATABASE_URL="postgresql://${DB_USER}:${PGPASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
     echo "Exported fallback DATABASE_URL."
 
@@ -49,7 +53,6 @@ else
     # Ensure it starts with postgresql:// for SQLAlchemy
     if [[ "$DATABASE_URL" != postgresql://* ]]; then
         echo "Warning: DATABASE_URL does not start with postgresql://. Attempting to fix..."
-        # Basic fix assuming postgres:// prefix
         FIXED_URL=$(echo "$DATABASE_URL" | sed 's/^postgres:\/\//postgresql:\/\//')
         if [[ "$FIXED_URL" == postgresql://* ]]; then
             export DATABASE_URL="$FIXED_URL"
@@ -112,7 +115,14 @@ case "$1" in
         python ${MAIN_PY} --schedule 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     *)
-        echo "No specific command provided ($1), defaulting to ETL process..." | tee -a ${ETL_LOGFILE}
+        # Check if an argument was passed - if so, it's an unknown command
+        if [ -n "$1" ]; then
+             echo "ERROR: Unknown command provided: '$1'" | tee -a ${ETL_LOGFILE}
+             echo "Expected 'fetch', 'import', 'etl', or 'schedule'." | tee -a ${ETL_LOGFILE}
+             exit 1 # Exit with error for unknown command
+        fi
+        # If no argument was passed, default to ETL (as before)
+        echo "No specific command provided, defaulting to ETL process..." | tee -a ${ETL_LOGFILE}
         echo "Command: python ${MAIN_PY} --days 7" | tee -a ${ETL_LOGFILE}
         echo "============ EXECUTING MAIN.PY ============" | tee -a ${ETL_LOGFILE}
         python ${MAIN_PY} --days 7 2>&1 | tee -a ${ETL_LOGFILE}
