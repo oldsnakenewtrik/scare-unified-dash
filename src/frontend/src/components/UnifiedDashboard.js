@@ -662,20 +662,35 @@ function UnifiedDashboard() {
                     <TableContainer component={Paper} sx={{ mt: 2, borderTop: '3px solid #23c785' }}>
                       <Table>
                         <TableBody>
-                          <TableRow sx={{ '& td': { fontWeight: 'bold', fontSize: '1.05em' } }}>
+                          <TableRow sx={{ '& td': { fontWeight: 'bold' } }}>
                             <TableCell width="5%"></TableCell>
                             <TableCell width="30%">{sourceSystem.name} Total:</TableCell>
-                            <TableCell align="right" width="10%">{formatNumber(sourceSystem.totals.impressions)}</TableCell>
-                            <TableCell align="right" width="10%">{formatNumber(sourceSystem.totals.clicks)}</TableCell>
                             <TableCell align="right" width="10%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>Impressions</Typography>
+                              {formatNumber(sourceSystem.totals.impressions)}
+                            </TableCell>
+                            <TableCell align="right" width="10%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>Clicks</Typography>
+                              {formatNumber(sourceSystem.totals.clicks)}
+                            </TableCell>
+                            <TableCell align="right" width="10%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>CTR</Typography>
                               {formatPercentage(calculateCTR(sourceSystem.totals.clicks, sourceSystem.totals.impressions))}
                             </TableCell>
-                            <TableCell align="right" width="10%">{formatCurrency(sourceSystem.totals.cost)}</TableCell>
                             <TableCell align="right" width="10%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>Cost</Typography>
+                              {formatCurrency(sourceSystem.totals.cost)}
+                            </TableCell>
+                            <TableCell align="right" width="10%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>CPC</Typography>
                               {formatCurrency(calculateCPC(sourceSystem.totals.cost, sourceSystem.totals.clicks))}
                             </TableCell>
-                            <TableCell align="right" width="5%">{formatNumber(sourceSystem.totals.conversions)}</TableCell>
                             <TableCell align="right" width="5%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>Conv</Typography>
+                              {formatNumber(sourceSystem.totals.conversions)}
+                            </TableCell>
+                            <TableCell align="right" width="5%">
+                              <Typography variant="caption" display="block" sx={{ color: '#666', mb: 0.5 }}>CPA</Typography>
                               {formatCurrency(calculateCPA(sourceSystem.totals.cost, sourceSystem.totals.conversions))}
                             </TableCell>
                             <TableCell align="right" width="5%"></TableCell> {/* Empty cell for Actions column */}
