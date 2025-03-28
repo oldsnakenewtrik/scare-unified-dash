@@ -91,19 +91,22 @@ function UnifiedDashboard() {
     setError(null);
     
     try {
-      let apiParams = {};
+      let apiParams = {
+        include_archived: showArchived // Pass the archived parameter to the API
+      };
       // Add date range parameters if not 'all-time'
       if (activeTab !== 'all-time') {
         const [year, month] = activeTab.split('-').map(Number);
         const startDate = new Date(year, month - 1, 1);
         const endDate = new Date(year, month, 0);
         apiParams = {
+          ...apiParams, // Keep the include_archived parameter
           start_date: startDate.toISOString().split('T')[0],
           end_date: endDate.toISOString().split('T')[0]
         };
         console.log("Fetching hierarchical data with date range:", apiParams);
       } else {
-        console.log("Fetching hierarchical data for all time");
+        console.log("Fetching hierarchical data for all time with include_archived:", showArchived);
       }
 
       // Fetch hierarchical data with optional date parameters
