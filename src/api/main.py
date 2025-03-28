@@ -496,8 +496,9 @@ def get_metrics_by_campaign(start_date: datetime.date, end_date: datetime.date, 
 # Add the missing endpoints that match what the frontend is expecting
 @app.get("/api/campaigns-hierarchical", response_model=List[CampaignHierarchical], tags=["Campaigns"]) # Added response_model
 async def get_campaigns_hierarchical(
-    start_date: Optional[datetime.date] = Query(None, description="Start date for filtering metrics"),
-    end_date: Optional[datetime.date] = Query(None, description="End date for filtering metrics"),
+    start_date: Optional[datetime.date] = Query(None, description="Filter by start date (inclusive)"),
+    end_date: Optional[datetime.date] = Query(None, description="Filter by end date (inclusive)"),
+    include_archived: Optional[bool] = Query(False, description="Include archived campaigns"),
     db=Depends(get_db)
 ):
     """
@@ -508,6 +509,7 @@ async def get_campaigns_hierarchical(
     
     try:
         logger.info("Fetching hierarchical campaign data")
+        logger.info(f"Include archived: {include_archived}")
         
         # Check if sm_campaign_name_mapping table exists
         try:
@@ -549,7 +551,7 @@ async def get_campaigns_hierarchical(
                                        WHEN LOWER(m.source_system) LIKE 'redtrack%' THEN 'redtrack'
                                        ELSE 'unknown' -- Avoid matching if source_system is unexpected
                                     END
-            WHERE m.is_active = TRUE {date_filter} -- Add placeholder for date filter
+            WHERE (:include_archived OR m.is_active = TRUE) {date_filter} -- Include all campaigns if include_archived is TRUE
             GROUP BY
                 m.id, -- Group by all columns from the mapping table
                 m.source_system,
@@ -576,6 +578,9 @@ async def get_campaigns_hierarchical(
             params["end_date"] = end_date
             logger.info(f"Filtering hierarchical data by date: {start_date} to {end_date}")
 
+        # Add the include_archived parameter to the params dictionary
+        params["include_archived"] = include_archived
+        
         # Replace the placeholder in the base query string
         final_sql = query_base.format(date_filter=date_filter_sql)
         final_query = text(final_sql)
@@ -794,21 +799,21 @@ async def get_unmapped_campaigns(db=Depends(get_db)):
                 FROM public.sm_fact_google_ads 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION ALL
+                UNION
                 
                 SELECT DISTINCT 'Bing Ads' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name
                 FROM public.sm_fact_bing_ads 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION ALL
+                UNION
                 
                 SELECT DISTINCT 'Matomo' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name 
                 FROM public.sm_fact_matomo 
                 WHERE campaign_id IS NOT NULL
                 
-                UNION ALL
+                UNION
                 
                 SELECT DISTINCT 'RedTrack' as source, CAST(campaign_id AS VARCHAR) as id,
                        campaign_name as name
