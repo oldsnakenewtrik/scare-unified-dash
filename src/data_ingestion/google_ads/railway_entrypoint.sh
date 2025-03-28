@@ -1,8 +1,9 @@
 #!/bin/bash
+echo "Script started at $(date)" > /tmp/entrypoint_start.log # IMMEDIATE LOG TEST
 
 # Enable logging to file for debugging cron issues
 LOGFILE="/var/log/google_ads/cron.log"
-mkdir -p /var/log/google_ads
+mkdir -p /var/log/google_ads || echo "Failed to create log dir" >> /tmp/entrypoint_start.log # Log dir creation attempt
 exec > >(tee -a ${LOGFILE})
 exec 2>&1
 
