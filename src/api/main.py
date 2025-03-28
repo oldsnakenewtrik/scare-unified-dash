@@ -168,6 +168,7 @@ class CampaignHierarchical(BaseModel):
     pretty_network: Optional[str] = None # Added
     pretty_source: Optional[str] = None  # Added
     display_order: int
+    is_active: bool # Added is_active status
     impressions: Optional[int] = None
     clicks: Optional[int] = None
     conversions: Optional[float] = None
