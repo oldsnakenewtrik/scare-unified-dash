@@ -523,16 +523,19 @@ async def get_campaigns_hierarchical(db=Depends(get_db)):
                 cm.campaign_type,
                 cm.network,
                 cm.display_order,
-                COALESCE(SUM(cf.impressions), 0) AS impressions,
-                COALESCE(SUM(cf.clicks), 0) AS clicks,
-                COALESCE(SUM(cf.conversions), 0) AS conversions,
-                COALESCE(SUM(cf.spend), 0) AS cost
-            FROM public.sm_campaign_name_mapping cm # Corrected table name
-            LEFT JOIN campaign_fact cf ON cm.external_campaign_id = cf.campaign_id
-                AND cm.source_system = cf.source_system
+                -- Aggregate metrics from the performance view
+                COALESCE(SUM(perf.impressions), 0) AS impressions,
+                COALESCE(SUM(perf.clicks), 0) AS clicks,
+                COALESCE(SUM(perf.conversions), 0) AS conversions,
+                COALESCE(SUM(perf.cost), 0) AS cost -- Use 'cost' from the view
+            FROM public.sm_campaign_name_mapping cm
+            -- Join with the campaign performance view instead of campaign_fact
+            LEFT JOIN public.sm_campaign_performance perf
+                ON cm.external_campaign_id = perf.campaign_id -- Join on external_id = view's campaign_id
+                AND LOWER(cm.source_system) = LOWER(perf.platform) -- Join on source_system = view's platform
             WHERE cm.is_active = TRUE
-            GROUP BY 
-                cm.id, 
+            GROUP BY
+                cm.id,
                 cm.source_system, 
                 cm.external_campaign_id,
                 cm.original_campaign_name,
