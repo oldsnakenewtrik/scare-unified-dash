@@ -78,6 +78,7 @@ COPY scripts/docker_entrypoint.sh /app/docker_entrypoint.sh
 
 # Make entrypoint script executable
 RUN chmod +x /app/docker_entrypoint.sh
+RUN chmod +x /app/src/data_ingestion/google_ads/railway_entrypoint.sh # Add execute permission for the Google Ads script
 
-# Set entrypoint
+# Set entrypoint (This is the default, overridden by Railway start command for gads-fetch)
 ENTRYPOINT ["/app/docker_entrypoint.sh"]
