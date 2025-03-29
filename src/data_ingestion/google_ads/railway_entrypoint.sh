@@ -111,8 +111,10 @@ case "$1" in
         ;;
     schedule)
         echo "Running scheduled ETL process via cron..." | tee -a ${ETL_LOGFILE}
-        echo "Command: python ${MAIN_PY} --schedule" | tee -a ${ETL_LOGFILE}
-        python ${MAIN_PY} --schedule 2>&1 | tee -a ${ETL_LOGFILE}
+        # Corrected command: Use --run-once instead of --schedule
+        # Assuming a 7-day lookback for scheduled runs, adjust --days if needed
+        echo "Command: python ${MAIN_PY} --run-once --days 7" | tee -a ${ETL_LOGFILE}
+        python ${MAIN_PY} --run-once --days 7 2>&1 | tee -a ${ETL_LOGFILE}
         ;;
     *)
         # Check if an argument was passed - if so, it's an unknown command
@@ -139,13 +141,5 @@ else
 fi
 
 echo "Script completed at: $(date)"
-echo "========== RAILWAY ENTRYPOINT SCRIPT END =========="
-
->>>>>>> Stashed changes
-=======
 echo "Check log files at: ${LOGFILE} and ${ETL_LOGFILE}"
 echo "========== RAILWAY ENTRYPOINT SCRIPT END (/app/railway_entrypoint.sh) =========="
-=======
-echo "========== RAILWAY ENTRYPOINT SCRIPT END =========="
-
->>>>>>> Stashed changes
