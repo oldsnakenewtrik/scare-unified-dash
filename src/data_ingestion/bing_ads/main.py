@@ -161,8 +161,7 @@ def download_bing_ads_report(auth_data, start_date, end_date):
 
         # Define Scope (Account IDs)
         report_scope = reporting_service.factory.create('AccountThroughCampaignReportScope')
-        report_scope.AccountIds = reporting_service.factory.create('ns4:ArrayOflong')
-        report_scope.AccountIds.long.append(int(BING_ADS_ACCOUNT_ID))
+        report_scope.AccountIds = [int(BING_ADS_ACCOUNT_ID)] # Assign Python list directly
         report_request.Scope = report_scope
 
         # Set the columns to include
