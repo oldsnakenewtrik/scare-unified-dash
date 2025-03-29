@@ -86,8 +86,9 @@ END_DATE_ARG=""
 case "$1" in
     schedule)
         echo "Running scheduled fetch mode (--run-once --days 7)..." | tee -a ${ETL_LOGFILE}
+        # Execute python script and capture its exit code, not tee's
         python ${MAIN_PY} --run-once --days 7 2>&1 | tee -a ${ETL_LOGFILE}
-        RESULT=$?
+        RESULT=${PIPESTATUS[0]} # Capture python's exit code from the pipeline
         ;;
     backfill)
         # Extract --start-date and --end-date
@@ -132,8 +133,9 @@ case "$1" in
 
         echo "Running in backfill mode..." | tee -a ${ETL_LOGFILE}
         echo "Command: ${BACKFILL_CMD}" | tee -a ${ETL_LOGFILE}
+        # Execute python script and capture its exit code, not tee's
         eval ${BACKFILL_CMD} 2>&1 | tee -a ${ETL_LOGFILE}
-        RESULT=$?
+        RESULT=${PIPESTATUS[0]} # Capture python's exit code from the pipeline
         ;;
     *)
         echo "ERROR: Unknown or missing command. Expected 'schedule' or 'backfill'." >&2 | tee -a ${ETL_LOGFILE}

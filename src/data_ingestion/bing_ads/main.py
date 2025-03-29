@@ -198,15 +198,9 @@ def download_bing_ads_report(auth_data, start_date, end_date):
 
         # Use the helper function from the SDK
         # Need ReportingServiceManager instance for download_report helper
-        reporting_service_manager = ReportingServiceManager(
-            authorization_data=auth_data,
-            poll_interval_in_milliseconds=5000,
-            environment='production'
-        )
-
         logger.info(f"Submitting report request for {start_date} to {end_date}")
         # The download_report function handles polling and downloading
-        report_container = reporting_service_manager.download_report(reporting_download_parameters)
+        report_container = reporting_service.download_report(reporting_download_parameters)
 
         if report_container and report_container.report_file_path:
             # Ensure the downloaded file matches the expected path
@@ -230,6 +224,36 @@ def download_bing_ads_report(auth_data, start_date, end_date):
     except Exception as e:
         logger.error(f"Error downloading Bing Ads report: {e}", exc_info=True)
         sys.exit(1) # Exit on failure
+
+    if not report_file_path: # Check after the try block
+        logger.error("Report download failed, file path variable is empty after try block.")
+        sys.exit(1) # Exit if path is empty
+
+    if not os.path.exists(report_file_path):
+        logger.error(f"Report file path does not exist after supposed download: {report_file_path}")
+        sys.exit(1) # Exit if file doesn't exist
+
+    # Handle potential ZIP file
+    if report_file_path.endswith('.zip'):
+        try:
+            # Extract the zip file
+            with zipfile.ZipFile(report_file_path, 'r') as zip_ref:
+                zip_ref.extractall(REPORTS_DIR)
+            # Remove the zip file
+            os.remove(report_file_path)
+            # Find the CSV file
+            for filename in os.listdir(REPORTS_DIR):
+                if filename.endswith('.csv'):
+                    report_file_path = os.path.join(REPORTS_DIR, filename)
+                    break
+            else:
+                logger.error("No CSV file found in the extracted zip.")
+                sys.exit(1) # Exit if no CSV found
+        except zipfile.BadZipFile:
+            logger.error(f"Invalid zip file: {report_file_path}")
+            sys.exit(1) # Exit on invalid zip
+
+    return report_file_path
 
 def parse_bing_ads_report(report_file_path):
     """
