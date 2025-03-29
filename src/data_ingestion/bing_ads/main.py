@@ -14,7 +14,6 @@ from sqlalchemy import create_engine, text
 from bingads.service_client import ServiceClient
 from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant 
 from bingads.v13.reporting import (
-    ReportRequest,
     CampaignPerformanceReportRequest, # Changed from KeywordPerformanceReportRequest
     ReportFormat,
     ReportAggregation,
