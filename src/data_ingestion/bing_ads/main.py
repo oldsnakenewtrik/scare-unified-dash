@@ -12,7 +12,7 @@ import sys # Added sys for exit codes
 import pandas as pd
 from sqlalchemy import create_engine, text
 from bingads.service_client import ServiceClient
-from bingads.authorization import AuthorizationData # Removed OAuthWebAuthCodeGrant as we use refresh token flow
+from bingads.authorization import AuthorizationData, OAuthWebAuthCodeGrant # Removed OAuthWebAuthCodeGrant as we use refresh token flow
 from bingads.v13.reporting import ReportingDownloadParameters # ReportingServiceManager is implicitly used via ServiceClient
 # Removed redundant import of ReportingServiceManager
 import xml.etree.ElementTree as ET
@@ -47,41 +47,28 @@ REPORTS_DIR = os.getenv('REPORTS_DIR', '/app/reports')
 # Create reports directory if it doesn't exist
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-def get_auth_data():
-    """
-    Get authentication data for Bing Ads API using refreshed token.
-
-    Returns:
-        AuthorizationData object or None if authentication fails.
-    """
+def create_bing_ads_auth():
+    """Creates Bing Ads authentication object and refreshes token."""
     try:
-        access_token = get_access_token()
-        if not access_token:
-            logger.error("Failed to get a valid access token for Bing Ads. Ensure token refresh succeeded.")
-            sys.exit(1) # Exit on failure
+        oauth_web_auth_code_grant = OAuthWebAuthCodeGrant(
+            client_id=BING_ADS_CLIENT_ID,
+            client_secret=BING_ADS_CLIENT_SECRET,
+            refresh_token=BING_ADS_REFRESH_TOKEN,
+            env_var=BING_ADS_REFRESH_TOKEN)
 
-        if not all([BING_ADS_DEVELOPER_TOKEN, BING_ADS_CLIENT_ID, BING_ADS_ACCOUNT_ID, BING_ADS_CUSTOMER_ID]):
-            logger.error("Missing required Bing Ads API credentials (Developer Token, Client ID, Account ID, Customer ID)")
-            sys.exit(1) # Exit on failure
+        # Refresh the token
+        oauth_web_auth_code_grant.refresh_authorization_data(
+            authentication=None)
 
-        auth_data = AuthorizationData(
-            account_id=BING_ADS_ACCOUNT_ID,
-            customer_id=BING_ADS_CUSTOMER_ID, # Customer ID is required for AuthorizationData
-            developer_token=BING_ADS_DEVELOPER_TOKEN,
-            authentication=None # Set below
-        )
-
-        # Set the authentication directly with the OAuth access token
-        auth_data.authentication = {
-            'access_token': access_token,
-            'client_id': BING_ADS_CLIENT_ID # Include client_id here for clarity, though primarily used in refresh
-        }
-
-        logger.info("Successfully created Bing Ads authentication data.")
-        return auth_data
+        # Update the refresh token in memory
+        BING_ADS_REFRESH_TOKEN = oauth_web_auth_code_grant.oauth_tokens.refresh_token
+        logger.info("Updated BING_ADS_REFRESH_TOKEN (in memory)")
+        
+        logger.info("Successfully refreshed Bing Ads token")
+        # Return the authentication object itself
+        return oauth_web_auth_code_grant
     except Exception as e:
-        logger.error(f"Error creating Bing Ads authentication data: {e}")
-        sys.exit(1) # Exit on failure
+        logger.error(f"Error refreshing Bing Ads token: {e}", exc_info=True)
 
 def get_db_connection():
     """
@@ -113,12 +100,12 @@ def get_db_connection():
         logger.error(f"Failed to connect to database: {e}")
         sys.exit(1) # Exit on failure
 
-def download_bing_ads_report(auth_data, start_date, end_date):
+def download_bing_ads_report(oauth_object, start_date, end_date):
     """
     Download campaign performance report from Bing Ads.
 
     Args:
-        auth_data: Bing Ads authorization data.
+        oauth_object: Bing Ads OAuth object.
         start_date: Start date in YYYY-MM-DD format.
         end_date: End date in YYYY-MM-DD format.
 
@@ -132,7 +119,7 @@ def download_bing_ads_report(auth_data, start_date, end_date):
         reporting_service = ServiceClient(
             service='Reporting',
             version=13,
-            authorization_data=auth_data,
+            authorization_data=oauth_object, # Use the passed OAuth object
             environment='production',
         )
 
@@ -439,25 +426,22 @@ def fetch_and_store_range(start_date, end_date):
     logger.info(f"Starting Bing Ads data fetch for range: {start_date} to {end_date}")
 
     # 1. Authentication
-    auth_data = get_auth_data()
-    # get_auth_data now exits on failure, no need to check return
+    oauth_object = create_bing_ads_auth()
+    if not oauth_object:
+        logger.error("Failed to create Bing Ads authentication object. Exiting.")
+        sys.exit(1)
 
     # 2. Download Report
-    report_path = download_bing_ads_report(auth_data, start_date, end_date)
-    # download_bing_ads_report now exits on failure
-
-    # 3. Parse Report
-    data = parse_bing_ads_report(report_path)
-    # parse_bing_ads_report now exits on failure or returns empty DF
-
-    # 4. Store Data
-    if data is not None and not data.empty:
-        store_bing_ads_data(data)
-        # store_bing_ads_data now exits on failure
-        logger.info(f"Successfully processed Bing Ads data for range: {start_date} to {end_date}")
-    elif data is not None and data.empty:
-         logger.info(f"No Bing Ads data found for range: {start_date} to {end_date}. Nothing to store.")
-    # No else needed, previous steps exit on error
+    report_path = download_bing_ads_report(oauth_object, start_date, end_date)
+    if report_path:
+        # 3. Parse Report
+        data = parse_bing_ads_report(report_path)
+        # 4. Store Data
+        if data is not None and not data.empty:
+            store_bing_ads_data(data)
+            logger.info(f"Successfully processed Bing Ads data for range: {start_date} to {end_date}")
+        elif data is not None and data.empty:
+             logger.info(f"No Bing Ads data found for range: {start_date} to {end_date}. Nothing to store.")
 
 def main():
     """
@@ -471,13 +455,15 @@ def main():
     parser.add_argument("--backfill", action="store_true", help="Run a historical data backfill for a specific date range.")
     parser.add_argument("--start-date", help="Start date for backfill (YYYY-MM-DD). Required if --backfill is used.")
     parser.add_argument("--end-date", help="End date for backfill (YYYY-MM-DD). Optional for --backfill, defaults to yesterday.")
+
     args = parser.parse_args()
 
     try:
         # Always ensure token is refreshed before proceeding
         logger.info("Attempting to refresh Bing Ads token...")
-        if not refresh_token():
-            logger.error("Failed to refresh Bing Ads token. Cannot proceed.")
+        oauth_object = create_bing_ads_auth()
+        if not oauth_object:
+            logger.error("Failed to create Bing Ads authentication object. Exiting.")
             sys.exit(1)
         logger.info("Bing Ads token refreshed successfully.")
 
