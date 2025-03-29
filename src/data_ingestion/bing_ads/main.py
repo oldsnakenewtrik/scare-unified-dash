@@ -53,10 +53,9 @@ def create_bing_ads_auth():
     # Declare intention to modify the global refresh token
     global BING_ADS_REFRESH_TOKEN 
     try:
-        # Initialize with client ID and secret
+        # Initialize with client ID only
         authentication = OAuthDesktopMobileAuthCodeGrant(
             client_id=BING_ADS_CLIENT_ID,
-            client_secret=BING_ADS_CLIENT_SECRET,
             env_var='production' # Use production environment
         )
 
