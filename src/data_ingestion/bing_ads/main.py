@@ -19,6 +19,10 @@ import xml.etree.ElementTree as ET
 import tempfile
 import json
 from token_refresh import get_access_token, get_refresh_token, refresh_token
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -93,10 +97,21 @@ def get_db_connection():
     Returns:
         SQLAlchemy engine connection
     """
-    connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    # Prioritize DATABASE_URL provided by the environment (e.g., Railway)
+    connection_string = os.getenv('DATABASE_URL')
+    if not connection_string:
+        logger.warning("DATABASE_URL not set. Falling back to individual DB variables (DB_HOST, DB_USER, etc.).")
+        connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    else:
+        # Ensure SQLAlchemy compatibility (replace postgres:// if needed)
+        if connection_string.startswith("postgres://"):
+             connection_string = connection_string.replace("postgres://", "postgresql://", 1)
+        logger.info("Using DATABASE_URL for database connection.")
+
     try:
+        # Log the connection string without the password for debugging
         engine = create_engine(connection_string)
-        logger.info("Database connection established")
+        logger.info(f"Attempting database connection to {engine.url.render_as_string(hide_password=True)}")
         return engine
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
@@ -420,12 +435,13 @@ def main():
     Main function to run the Bing Ads connector
     """
     parser = argparse.ArgumentParser(description="Bing Ads data connector")
-    parser.add_argument("--backfill", action="store_true", help="Run in backfill mode")
+    parser.add_argument("--schedule", action="store_true", help="Run in scheduled mode (long-running)")
+    parser.add_argument("--backfill", action="store_true", help="Run in backfill mode (one-off)")
     parser.add_argument("--start-date", help="Start date for backfill (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date for backfill (YYYY-MM-DD)")
     args = parser.parse_args()
-    
-    # Always ensure token is refreshed when starting
+
+    # Always ensure token is refreshed when starting any mode
     refresh_token()
     
     if args.backfill:
@@ -433,18 +449,24 @@ def main():
             logger.error("Start date required for backfill")
             return
         backfill_bing_ads_data(args.start_date, args.end_date)
-    else:
-        # Set up regular schedule and run indefinitely
-        setup_schedule()
-        logger.info("Starting scheduled jobs...")
-        
-        # Add a token refresh schedule - every 50 minutes
-        schedule.every(50).minutes.do(refresh_token)
-        
-        # Keep the script running
+    elif args.schedule:
+        # Run in scheduled mode (long-running) - This is triggered by Railway Start Command
+        logger.info("Running in scheduled mode...")
+        # Initial token refresh is already done at the start of main()
+        # Set up internal schedule
+        setup_schedule() # This function now only sets up the jobs
+        logger.info("Scheduled jobs have been set up")
+        logger.info("Starting internal scheduler loop...")
         while True:
             schedule.run_pending()
-            time.sleep(60)  # Sleep for 1 minute between schedule checks
+            time.sleep(60) # Check every minute
+    else:
+        # If no arguments are provided (e.g., manual run without args), run a single daily fetch and exit.
+        logger.info("No specific mode (--schedule or --backfill) provided. Running a single daily fetch...")
+        # Token refresh already done at the start of main()
+        fetch_and_store_daily_data()
+        logger.info("Single daily data fetch complete.")
+        # Script exits after one run
 
 if __name__ == "__main__":
     main()

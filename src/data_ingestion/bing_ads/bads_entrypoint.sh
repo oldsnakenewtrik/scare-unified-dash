@@ -90,14 +90,28 @@ echo "Found Bing Ads Python script."
 echo "========== COMMAND EXECUTION START =========="
 set -x # Enable command tracing
 
-# Only pass arguments to main.py if they exist (e.g., for backfill)
-if [ -n "$1" ]; then
-    # Pass all arguments ($@) if provided
-    python ${BING_ADS_MAIN_PY} "$@"
-else
-    # Run main.py without arguments for default schedule mode
-    python ${BING_ADS_MAIN_PY}
-fi
+case "$1" in
+    schedule)
+        echo "Running in scheduled mode..."
+        python ${BING_ADS_MAIN_PY} --schedule # Add --schedule flag for main.py
+        ;;
+    --backfill)
+        echo "Running in backfill mode..."
+        # Pass all arguments ($@) including --backfill and dates
+        python ${BING_ADS_MAIN_PY} "$@"
+        ;;
+    *)
+        # Handle potential unknown commands or default behavior if needed
+        if [ -n "$1" ]; then
+             echo "ERROR: Unknown command provided: '$1'"
+             exit 1
+        fi
+        # Default: Run daily fetch and exit (for manual runs without args?)
+        # Or maybe exit with error? Let's default to error for clarity.
+        echo "ERROR: No command specified (expected 'schedule' or '--backfill')."
+        exit 1
+        ;;
+esac
 
 RESULT=$?
 set +x # Disable command tracing
