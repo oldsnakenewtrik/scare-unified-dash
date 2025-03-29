@@ -103,12 +103,12 @@ def get_db_connection():
         logger.error(f"Failed to connect to database: {e}")
         sys.exit(1) # Exit on failure
 
-def download_bing_ads_report(oauth_object, start_date, end_date):
+def download_bing_ads_report(authorization_data, start_date, end_date):
     """
     Download campaign performance report from Bing Ads.
 
     Args:
-        oauth_object: Bing Ads OAuth object.
+        authorization_data: Full AuthorizationData object.
         start_date: Start date in YYYY-MM-DD format.
         end_date: End date in YYYY-MM-DD format.
 
@@ -120,9 +120,9 @@ def download_bing_ads_report(oauth_object, start_date, end_date):
     try:
         # Initialize the Reporting Service Client
         reporting_service = ServiceClient(
-            service='Reporting',
+            service='ReportingService',
             version=13,
-            authorization_data=oauth_object, # Use the passed OAuth object
+            authorization_data=authorization_data, # Use the full object
             environment='production',
         )
 
@@ -470,13 +470,32 @@ def main():
             sys.exit(1)
         logger.info("Bing Ads token refreshed successfully.")
 
+        # 2. Create the full AuthorizationData object
+        try:
+            authorization_data = AuthorizationData(
+                account_id=BING_ADS_ACCOUNT_ID,
+                customer_id=BING_ADS_CUSTOMER_ID,
+                developer_token=BING_ADS_DEVELOPER_TOKEN,
+                authentication=oauth_object
+            )
+            logger.info("Created full AuthorizationData object.")
+        except Exception as e:
+            logger.error(f"Error creating AuthorizationData object: {e}", exc_info=True)
+            logger.error("Check if BING_ADS_ACCOUNT_ID, CUSTOMER_ID, DEVELOPER_TOKEN are set correctly.")
+            sys.exit(1)
+
         if args.run_once:
             logger.info(f"Running in --run-once mode for the last {args.days} days.")
             end_date_dt = datetime.datetime.now() - datetime.timedelta(days=1)
             start_date_dt = end_date_dt - datetime.timedelta(days=args.days - 1)
             start_date_str = start_date_dt.strftime("%Y-%m-%d")
             end_date_str = end_date_dt.strftime("%Y-%m-%d")
-            fetch_and_store_range(start_date_str, end_date_str)
+            logger.info(f"Starting Bing Ads data fetch for range: {start_date_str} to {end_date_str}")
+            # Pass the full authorization_data object
+            report_file_path = download_bing_ads_report(authorization_data, start_date_str, end_date_str)
+            if report_file_path:
+                data = parse_bing_ads_report(report_file_path)
+                store_bing_ads_data(data)
         elif args.backfill:
             if not args.start_date:
                 logger.error("Error: --start-date is required when using --backfill.")
@@ -485,11 +504,11 @@ def main():
             if not end_date_str:
                 end_date_str = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
             logger.info(f"Running in --backfill mode from {args.start_date} to {end_date_str}.")
-            fetch_and_store_range(args.start_date, end_date_str)
-        else:
-            logger.error("Error: No operation mode specified. Use --run-once or --backfill.")
-            parser.print_help()
-            sys.exit(1)
+            # Pass the full authorization_data object
+            report_file_path = download_bing_ads_report(authorization_data, args.start_date, end_date_str)
+            if report_file_path:
+                data = parse_bing_ads_report(report_file_path)
+                store_bing_ads_data(data)
 
         logger.info("Bing Ads script completed successfully.")
         sys.exit(0) # Explicitly exit with 0 on success
