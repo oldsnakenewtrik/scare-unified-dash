@@ -12,10 +12,8 @@ import sys # Added sys for exit codes
 import pandas as pd
 from sqlalchemy import create_engine, text
 from bingads.service_client import ServiceClient
-# Use OAuthDesktopMobileAuthCodeGrant for refresh token flow
 from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant 
 from bingads.v13.reporting import ReportingDownloadParameters # ReportingServiceManager is implicitly used via ServiceClient
-# Removed redundant import of ReportingServiceManager
 import xml.etree.ElementTree as ET
 import tempfile
 from token_refresh import get_access_token, refresh_token # Removed get_refresh_token
@@ -57,6 +55,9 @@ def create_bing_ads_auth():
         authentication = OAuthDesktopMobileAuthCodeGrant(
             client_id=BING_ADS_CLIENT_ID,
         )
+
+        # Manually set the client secret after initialization
+        authentication.client_secret = BING_ADS_CLIENT_SECRET
 
         # Request new tokens using the refresh token passed as argument
         authentication.request_oauth_tokens_by_refresh_token(BING_ADS_REFRESH_TOKEN)
