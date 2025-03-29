@@ -12,7 +12,8 @@ import sys # Added sys for exit codes
 import pandas as pd
 from sqlalchemy import create_engine, text
 from bingads.service_client import ServiceClient
-from bingads.authorization import AuthorizationData, OAuthWebAuthCodeGrant # Removed OAuthWebAuthCodeGrant as we use refresh token flow
+# Use OAuthDesktopMobileAuthCodeGrant for refresh token flow
+from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant 
 from bingads.v13.reporting import ReportingDownloadParameters # ReportingServiceManager is implicitly used via ServiceClient
 # Removed redundant import of ReportingServiceManager
 import xml.etree.ElementTree as ET
@@ -52,23 +53,27 @@ def create_bing_ads_auth():
     # Declare intention to modify the global refresh token
     global BING_ADS_REFRESH_TOKEN 
     try:
-        oauth_web_auth_code_grant = OAuthWebAuthCodeGrant(
+        # Initialize with client ID and secret
+        authentication = OAuthDesktopMobileAuthCodeGrant(
             client_id=BING_ADS_CLIENT_ID,
             client_secret=BING_ADS_CLIENT_SECRET,
-            refresh_token=BING_ADS_REFRESH_TOKEN,
-            env_var=BING_ADS_REFRESH_TOKEN)
+            env_var='production' # Use production environment
+        )
 
-        # Refresh the token
-        oauth_web_auth_code_grant.refresh_authorization_data(
-            authentication=None)
+        # Assign the existing refresh token
+        authentication.oauth_tokens.refresh_token = BING_ADS_REFRESH_TOKEN
 
-        # Update the refresh token in memory
-        BING_ADS_REFRESH_TOKEN = oauth_web_auth_code_grant.oauth_tokens.refresh_token
-        logger.info("Updated BING_ADS_REFRESH_TOKEN (in memory)")
+        # Request new tokens using the refresh token
+        authentication.request_oauth_tokens_by_refresh_token()
+        
+        # Update the global refresh token if a new one was provided by the response
+        if authentication.oauth_tokens.refresh_token:
+            BING_ADS_REFRESH_TOKEN = authentication.oauth_tokens.refresh_token
+            logger.info("Updated BING_ADS_REFRESH_TOKEN (in memory)")
         
         logger.info("Successfully refreshed Bing Ads token")
         # Return the authentication object itself
-        return oauth_web_auth_code_grant
+        return authentication
     except Exception as e:
         logger.error(f"Error refreshing Bing Ads token: {e}", exc_info=True)
 
