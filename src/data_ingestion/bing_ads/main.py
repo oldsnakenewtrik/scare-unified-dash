@@ -49,6 +49,8 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 def create_bing_ads_auth():
     """Creates Bing Ads authentication object and refreshes token."""
+    # Declare intention to modify the global refresh token
+    global BING_ADS_REFRESH_TOKEN 
     try:
         oauth_web_auth_code_grant = OAuthWebAuthCodeGrant(
             client_id=BING_ADS_CLIENT_ID,
