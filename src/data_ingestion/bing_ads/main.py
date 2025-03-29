@@ -13,11 +13,27 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from bingads.service_client import ServiceClient
 from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant 
-from bingads.v13.reporting import ReportingDownloadParameters # ReportingServiceManager is implicitly used via ServiceClient
+from bingads.v13.reporting import (
+    ReportRequest,
+    CampaignPerformanceReportRequest, # Changed from KeywordPerformanceReportRequest
+    ReportFormat,
+    ReportAggregation,
+    ReportTime, 
+    ReportFilter, # Added for potential future use
+    Date, 
+    AccountThroughCampaignReportScope,
+    CampaignPerformanceReportColumn, # Changed columns
+    NonHourlyReportAggregation, # Correct aggregation enum
+    ReportRequestStatusType, # For polling
+    # ReportingDownloadParameters - Not used in Submit/Poll/Download flow
+)
+from bingads.v13.reporting import ReportingServiceManager # We might need this after all?
+
 import xml.etree.ElementTree as ET
 import tempfile
-from token_refresh import get_access_token, refresh_token # Removed get_refresh_token
-from dotenv import load_dotenv
+import time # For polling
+import requests # For downloading the report file
+import zipfile
 
 # Load environment variables from .env file
 load_dotenv()
@@ -104,146 +120,132 @@ def get_db_connection():
         sys.exit(1) # Exit on failure
 
 def download_bing_ads_report(authorization_data, start_date, end_date):
-    """
-    Download campaign performance report from Bing Ads.
-
-    Args:
-        authorization_data: Full AuthorizationData object.
-        start_date: Start date in YYYY-MM-DD format.
-        end_date: End date in YYYY-MM-DD format.
-
-    Returns:
-        Path to downloaded report file or exits on failure.
-    """
-    report_file_path = os.path.join(REPORTS_DIR, f"bing_ads_report_{start_date}_to_{end_date}.csv")
+    """Download Bing Ads Campaign Performance Report using Submit/Poll/Download."""
+    report_file_path = None
+    report_file_name = f"bing_ads_report_{start_date}_to_{end_date}.csv"
 
     try:
         # Initialize the Reporting Service Client
         reporting_service = ServiceClient(
             service='ReportingService',
             version=13,
-            authorization_data=authorization_data, # Use the full object
+            authorization_data=authorization_data, 
             environment='production',
         )
-
-        # Define the report request using the service client's factory
+        
+        # Define the report request
         report_request = reporting_service.factory.create('CampaignPerformanceReportRequest')
-        report_request.Format = 'Csv'
-        report_request.ReturnOnlyCompleteData = False
-        report_request.Aggregation = 'Daily'
+        report_request.Format = ReportFormat.csv
+        report_request.ReportName = 'SCARE Campaign Performance Report'
+        # Use NonHourlyReportAggregation for daily aggregation
+        report_request.Aggregation = NonHourlyReportAggregation.daily 
+        
+        # Define report scope (Account level)
+        report_request.Scope = reporting_service.factory.create('AccountThroughCampaignReportScope')
+        report_request.Scope.AccountIds = None # None means all accounts for the customer
+        report_request.Scope.Campaigns = None # None means all campaigns
 
-        # Set the time period
+        # Define report time period
         report_time = reporting_service.factory.create('ReportTime')
-        start_dt = datetime.datetime.strptime(start_date, '%Y-%m-%d')
-        end_dt = datetime.datetime.strptime(end_date, '%Y-%m-%d')
-
+        # Assuming start_date and end_date are strings YYYY-MM-DD
+        start_date_parts = [int(p) for p in start_date.split('-')]
+        end_date_parts = [int(p) for p in end_date.split('-')]
         report_time.CustomDateRangeStart = reporting_service.factory.create('Date')
-        report_time.CustomDateRangeStart.Day = start_dt.day
-        report_time.CustomDateRangeStart.Month = start_dt.month
-        report_time.CustomDateRangeStart.Year = start_dt.year
-
+        report_time.CustomDateRangeStart.Day = start_date_parts[2]
+        report_time.CustomDateRangeStart.Month = start_date_parts[1]
+        report_time.CustomDateRangeStart.Year = start_date_parts[0]
         report_time.CustomDateRangeEnd = reporting_service.factory.create('Date')
-        report_time.CustomDateRangeEnd.Day = end_dt.day
-        report_time.CustomDateRangeEnd.Month = end_dt.month
-        report_time.CustomDateRangeEnd.Year = end_dt.year
-
+        report_time.CustomDateRangeEnd.Day = end_date_parts[2]
+        report_time.CustomDateRangeEnd.Month = end_date_parts[1]
+        report_time.CustomDateRangeEnd.Year = end_date_parts[0]
         report_request.Time = report_time
 
-        # Define Scope (Account IDs)
-        report_scope = reporting_service.factory.create('AccountThroughCampaignReportScope')
-        report_scope.AccountIds = [int(BING_ADS_ACCOUNT_ID)] # Assign Python list directly
-        report_request.Scope = report_scope
-
-        # Set the columns to include
+        # Define report columns
         report_columns = reporting_service.factory.create('ArrayOfCampaignPerformanceReportColumn')
-        # Corrected way to append columns
-        columns_to_add = [
-            'TimePeriod',
-            'AccountId',
-            'AccountName',
-            'CampaignId',
-            'CampaignName',
-            'CampaignStatus',
-            'Impressions',
-            'Clicks',
-            'Spend',
-            'Conversions', # Check if this is the correct Bing Ads name (might be 'AllConversions')
-            'Revenue', # Check if this is the correct Bing Ads name (might be 'AllRevenue')
-            'AverageCpc',
-            'CostPerConversion' # Check if this is the correct Bing Ads name (might be 'CostPerAllConversion')
-        ]
-        for col in columns_to_add:
-             report_columns.CampaignPerformanceReportColumn.append(col)
+        report_columns.CampaignPerformanceReportColumn.extend([
+            CampaignPerformanceReportColumn.time_period,
+            CampaignPerformanceReportColumn.account_name,
+            CampaignPerformanceReportColumn.account_id,
+            CampaignPerformanceReportColumn.campaign_name,
+            CampaignPerformanceReportColumn.campaign_id,
+            CampaignPerformanceReportColumn.ad_group_name, # Added AdGroupName
+            CampaignPerformanceReportColumn.ad_group_id, # Added AdGroupId
+            CampaignPerformanceReportColumn.impressions,
+            CampaignPerformanceReportColumn.clicks,
+            CampaignPerformanceReportColumn.spend,
+            CampaignPerformanceReportColumn.conversions, # Assuming this maps to 'all_conversions'
+            CampaignPerformanceReportColumn.cost_per_conversion, # Assuming this maps to 'cost_per_all_conversion'
+            CampaignPerformanceReportColumn.network, # Added network
+            CampaignPerformanceReportColumn.device_type # Added device type
+        ])
         report_request.Columns = report_columns
 
-        # Submit and download the report using ReportingDownloadParameters
-        reporting_download_parameters = ReportingDownloadParameters(
-            report_request=report_request,
-            result_file_directory=REPORTS_DIR, # Use the specified directory
-            result_file_name=os.path.basename(report_file_path), # Just the filename
-            overwrite_result_file=True,
-            # Optional: Set timeout in milliseconds
-            timeout_in_milliseconds = 3600000 # 1 hour
-        )
-
-        # Use the helper function from the SDK
-        # Need ReportingServiceManager instance for download_report helper
+        # Submit the report request
         logger.info(f"Submitting report request for {start_date} to {end_date}")
-        # The download_report function handles polling and downloading
-        report_container = reporting_service.download_report(reporting_download_parameters)
+        submit_response = reporting_service.SubmitGenerateReport(
+            ReportRequest=report_request
+        )
+        report_request_id = submit_response.ReportRequestId
+        logger.info(f"Report request submitted. ID: {report_request_id}")
 
-        if report_container and report_container.report_file_path:
-            # Ensure the downloaded file matches the expected path
-            # The SDK might add suffixes, so we need the actual path returned
-            actual_report_path = report_container.report_file_path
-            logger.info(f"Report successfully downloaded to {actual_report_path}")
-            # If the path differs, move/rename it to our standard name for consistency
-            if actual_report_path != report_file_path:
-                try:
-                    os.rename(actual_report_path, report_file_path)
-                    logger.info(f"Renamed downloaded report to {report_file_path}")
-                    actual_report_path = report_file_path
-                except OSError as move_error:
-                    logger.warning(f"Could not rename report from {actual_report_path} to {report_file_path}: {move_error}")
-            return actual_report_path
-        else:
-            logger.warning("Report download did not return a valid file path or container.")
-            # If the download 'succeeds' but returns no path, treat it as failure for data processing
-            sys.exit(1) # Exit as we expected data but got none
+        # Poll for report status
+        MAX_POLL_ATTEMPTS = 10
+        POLL_INTERVAL_SECONDS = 30
+        report_download_url = None
+
+        for attempt in range(MAX_POLL_ATTEMPTS):
+            logger.info(f"Polling report status (Attempt {attempt + 1}/{MAX_POLL_ATTEMPTS})...")
+            status_response = reporting_service.GetReportRequestStatus(
+                ReportRequestId=report_request_id
+            )
+            report_status = status_response.Status
+            
+            if report_status == ReportRequestStatusType.success:
+                logger.info("Report generated successfully.")
+                report_download_url = status_response.ReportDownloadUrl
+                break
+            elif report_status == ReportRequestStatusType.error:
+                logger.error(f"Report generation failed. Status: {report_status}")
+                # Log error details if available
+                if hasattr(status_response, 'Errors') and status_response.Errors:
+                    for error in status_response.Errors.ReportRequestError:
+                        logger.error(f"  Error Code: {error.Code}, Message: {error.Message}")
+                return None # Exit on error
+            elif report_status == ReportRequestStatusType.pending:
+                logger.info(f"Report status is Pending. Waiting {POLL_INTERVAL_SECONDS} seconds...")
+                time.sleep(POLL_INTERVAL_SECONDS)
+            else:
+                 logger.warning(f"Unexpected report status: {report_status}. Continuing poll...")
+                 time.sleep(POLL_INTERVAL_SECONDS)
+
+        if not report_download_url:
+            logger.error(f"Report download URL not found after {MAX_POLL_ATTEMPTS} polling attempts. Status was {report_status}")
+            return None
+
+        # Download the report
+        logger.info(f"Downloading report from: {report_download_url}")
+        report_file_path = os.path.join(REPORTS_DIR, report_file_name)
+        
+        response = requests.get(report_download_url, stream=True)
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        with open(report_file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        logger.info(f"Report successfully downloaded to: {report_file_path}")
+        return report_file_path
 
     except Exception as e:
-        logger.error(f"Error downloading Bing Ads report: {e}", exc_info=True)
-        sys.exit(1) # Exit on failure
-
-    if not report_file_path: # Check after the try block
-        logger.error("Report download failed, file path variable is empty after try block.")
-        sys.exit(1) # Exit if path is empty
-
-    if not os.path.exists(report_file_path):
-        logger.error(f"Report file path does not exist after supposed download: {report_file_path}")
-        sys.exit(1) # Exit if file doesn't exist
-
-    # Handle potential ZIP file
-    if report_file_path.endswith('.zip'):
-        try:
-            # Extract the zip file
-            with zipfile.ZipFile(report_file_path, 'r') as zip_ref:
-                zip_ref.extractall(REPORTS_DIR)
-            # Remove the zip file
-            os.remove(report_file_path)
-            # Find the CSV file
-            for filename in os.listdir(REPORTS_DIR):
-                if filename.endswith('.csv'):
-                    report_file_path = os.path.join(REPORTS_DIR, filename)
-                    break
-            else:
-                logger.error("No CSV file found in the extracted zip.")
-                sys.exit(1) # Exit if no CSV found
-        except zipfile.BadZipFile:
-            logger.error(f"Invalid zip file: {report_file_path}")
-            sys.exit(1) # Exit on invalid zip
-
-    return report_file_path
+        logger.error(f"Error in Bing Ads report download process: {e}", exc_info=True)
+        # Clean up partial file if it exists
+        if report_file_path and os.path.exists(report_file_path):
+            try:
+                os.remove(report_file_path)
+                logger.info(f"Removed partially downloaded file: {report_file_path}")
+            except OSError as remove_err:
+                logger.error(f"Error removing partial file {report_file_path}: {remove_err}")
+        return None
 
 def parse_bing_ads_report(report_file_path):
     """
