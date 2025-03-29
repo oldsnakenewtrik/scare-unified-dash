@@ -58,11 +58,8 @@ def create_bing_ads_auth():
             client_id=BING_ADS_CLIENT_ID,
         )
 
-        # Assign the existing refresh token
-        authentication.oauth_tokens.refresh_token = BING_ADS_REFRESH_TOKEN
-
-        # Request new tokens using the refresh token
-        authentication.request_oauth_tokens_by_refresh_token()
+        # Request new tokens using the refresh token passed as argument
+        authentication.request_oauth_tokens_by_refresh_token(BING_ADS_REFRESH_TOKEN)
         
         # Update the global refresh token if a new one was provided by the response
         if authentication.oauth_tokens.refresh_token:
